@@ -6546,11 +6546,8 @@ namespace LegionRuntime {
                               IndexPartition p, Arrays::Point<DIM> color_point)
     //--------------------------------------------------------------------------
     {
-      Arrays::Rect<DIM> color_space = 
-        get_index_partition_color_space(ctx, p).get_rect<DIM>();
-      Arrays::CArrayLinearization<DIM> color_space_lin(color_space);
-      return get_index_subspace(ctx, p, 
-                                  (Color)(color_space_lin.image(color_point)));
+      DomainPoint dom_point = DomainPoint::from_point<DIM>(color_point);
+      return get_index_subspace(ctx, p, dom_point); 
     }
 
     //--------------------------------------------------------------------------
@@ -6632,10 +6629,8 @@ namespace LegionRuntime {
                                           Arrays::Point<DIM> &color_point) const
     //--------------------------------------------------------------------------
     {
-      Arrays::Rect<DIM> color_space = 
-        get_index_partition_color_space(p).get_rect<DIM>();
-      Arrays::CArrayLinearization<DIM> color_space_lin(color_space);
-      return get_index_subspace(p, (Color)(color_space_lin.image(color_point)));
+      DomainPoint dom_point = DomainPoint::from_point<DIM>(color_point);
+      return get_index_subspace(ctx, p, dom_point);
     }
     
     //--------------------------------------------------------------------------
