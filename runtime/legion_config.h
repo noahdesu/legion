@@ -377,7 +377,12 @@ typedef unsigned int legion_trace_id_t;
 typedef unsigned int legion_mapper_id_t;
 typedef unsigned int legion_context_id_t;
 typedef unsigned int legion_instance_id_t;
+// TODO: remove once bd9ea40ae587f1f32d00db837209a2bc38b00c89 is merged in
+#ifdef LEGION_IDS_ARE_64BIT
+typedef long long int legion_index_space_id_t;
+#else
 typedef unsigned int legion_index_space_id_t;
+#endif
 typedef unsigned int legion_index_partition_id_t;
 typedef unsigned int legion_index_tree_id_t;
 typedef unsigned int legion_field_space_id_t;
