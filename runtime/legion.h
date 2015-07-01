@@ -2664,6 +2664,8 @@ namespace LegionRuntime {
       IndexPartition get_index_partition(IndexSpace parent, Color color) const;
 
       IndexSpace get_index_subspace(IndexPartition p, Color c) const;
+      IndexSpace get_index_subspace(IndexPartition p, 
+                                    const DomainPoint &c) const;
 
       bool has_multiple_domains(IndexSpace handle) const;
 
