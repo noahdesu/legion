@@ -6630,7 +6630,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       DomainPoint dom_point = DomainPoint::from_point<DIM>(color_point);
-      return get_index_subspace(ctx, p, dom_point);
+      return get_index_subspace(p, dom_point);
     }
     
     //--------------------------------------------------------------------------
