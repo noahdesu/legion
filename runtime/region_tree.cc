@@ -394,7 +394,7 @@ namespace LegionRuntime {
             // Check that parent is an ancestor of both partitions
             if (!compute_partition_path(parent, handle1, path))
             {
-              log_index.error("Index space %d is not an ancestor of "
+              log_index.error("Index space " IDFMT " is not an ancestor of "
                                     "index partition %d in create partition "
                                     "by union call!", parent.id, handle1.id);
               assert(false);
@@ -403,7 +403,7 @@ namespace LegionRuntime {
             path.clear();
             if (!compute_partition_path(parent, handle2, path))
             {
-              log_index.error("Index space %d is not an ancestor of "
+              log_index.error("Index space " IDFMT " is not an ancestor of "
                                     "index partition %d in create partition "
                                     "by union call!", parent.id, handle1.id);
               assert(false);
@@ -419,7 +419,7 @@ namespace LegionRuntime {
               path.clear();
               if (!compute_partition_path(parent, handle2, path))
               {
-                log_index.error("Index space %d is not an ancestor of "
+                log_index.error("Index space " IDFMT " is not an ancestor of "
                                       "either index partition %d or index "
                                       "partition %d in create partition by "
                                       "intersection call!", 
@@ -435,7 +435,7 @@ namespace LegionRuntime {
             // Check that the parent is an ancestor of the first index partition
             if (!compute_partition_path(parent, handle1, path))
             {
-              log_index.error("Index space %d is not an ancestor of "
+              log_index.error("Index space " IDFMT " is not an ancestor of "
                                     "index partition %d in create partition "
                                     "by difference call!", 
                                     parent.id, handle1.id);
