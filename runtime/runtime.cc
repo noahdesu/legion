@@ -6848,7 +6848,7 @@ namespace LegionRuntime {
       if (parent.get_tree_id() != handle1.get_tree_id())
       {
         log_index.error("IndexPartition %d is not part of the same "
-                              "index tree as IndexSpace %d in create "
+                              "index tree as IndexSpace " IDFMT " in create "
                               "partition by intersection!",
                               handle1.id, parent.id);
         assert(false);
