@@ -2533,6 +2533,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace HighLevelRuntime::get_index_subspace(Context ctx,
+                                     IndexPartition p, const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_subspace(ctx, p, color);
+    }
+
+    //--------------------------------------------------------------------------
     bool HighLevelRuntime::has_multiple_domains(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
