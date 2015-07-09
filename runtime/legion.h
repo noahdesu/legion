@@ -6506,11 +6506,12 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(mapping.preimage_is_dense(pir.p));
 #endif
-        c[color_space_lin.image(pir.p)] = Domain::from_rect<T::IDIM>(preimage);
+        c[DomainPoint::from_point<T::IDIM>(pir.p)] =
+          Domain::from_rect<T::IDIM>(preimage);
       }
       IndexPartition result = create_index_partition(ctx, parent, 
               Domain::from_rect<T::ODIM>(color_space), c, 
-              true/*disjoint*/, part_color);
+              DISJOINT_KIND, part_color);
 #ifdef DEBUG_HIGH_LEVEL
       // We don't actually know if we're supposed to check disjointness
       // so if we're in debug mode then just do it.
