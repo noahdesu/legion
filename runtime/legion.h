@@ -6497,8 +6497,7 @@ namespace LegionRuntime {
       Arrays::Rect<T::IDIM> parent_rect = 
         get_index_space_domain(ctx, parent).get_rect<T::IDIM>();
       Arrays::Rect<T::ODIM> color_space = mapping.image_convex(parent_rect);
-      Arrays::CArrayLinearization<T::ODIM> color_space_lin(color_space);
-      DomainColoring c;
+      DomainPointColoring c;
       for (typename T::PointInOutputRectIterator pir(color_space); 
           pir; pir++) 
       {
@@ -6516,12 +6515,12 @@ namespace LegionRuntime {
       // We don't actually know if we're supposed to check disjointness
       // so if we're in debug mode then just do it.
       {
-        std::set<Color> current_colors;  
-        for (DomainColoring::const_iterator it1 = c.begin();
+        std::set<DomainPoint> current_colors;  
+        for (DomainPointColoring::const_iterator it1 = c.begin();
               it1 != c.end(); it1++)
         {
           current_colors.insert(it1->first);
-          for (DomainColoring::const_iterator it2 = c.begin();
+          for (DomainPointColoring::const_iterator it2 = c.begin();
                 it2 != c.end(); it2++)
           {
             if (current_colors.find(it2->first) != current_colors.end())
@@ -6530,9 +6529,33 @@ namespace LegionRuntime {
             Arrays::Rect<T::IDIM> rect2 = it2->second.get_rect<T::IDIM>();
             if (rect1.overlaps(rect2))
             {
-              fprintf(stderr,"ERROR: colors %d and %d of partition %d are "
-                             "not disjoint rectangles as they should be!",
-                              it1->first, it2->first, result.id);
+              switch (it1->first.dim)
+              {
+                case 1:
+                  fprintf(stderr, "ERROR: colors %d and %d of partition %d are "
+                                  "not disjoint rectangles as they should be!",
+                          (it1->first)[0], (it2->first)[0], result.id);
+                  break;
+                case 2:
+                  fprintf(stderr, "ERROR: colors (%d, %d) and (%d, %d) of "
+                  "partition %d are not disjoint rectangles "
+                  "as they should be!",
+                    (it1->first)[0], (it1->first)[1],
+                    (it2->first)[0], (it2->first)[1],
+                    result.id);
+                  break;
+                case 3:
+                  fprintf(stderr, "ERROR: colors (%d, %d, %d) and (%d, %d, %d) "
+                  "of partition %d are not disjoint rectangles "
+                  "as they should be!",
+                  (it1->first)[0], (it1->first)[1],
+                  (it1->first)[2], (it2->first)[0],
+                  (it2->first)[1], (it2->first)[2],
+                  result.id);
+                  break;
+                default:
+                  assert(false);
+              }
               assert(false);
               exit(ERROR_DISJOINTNESS_TEST_FAILURE);
             }
