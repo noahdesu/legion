@@ -63,5 +63,6 @@ end
 
 print("Importing Legion...")
 
-local legion = require("legion")
+local legionlib = require("legionlib")
+-- local legion = require("legion")
 -- import "legion"
