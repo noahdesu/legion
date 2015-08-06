@@ -38,7 +38,7 @@ local cpennant
 do
   local root_dir = arg[0]:match(".*/") or "./"
   local runtime_dir = root_dir .. "../../runtime"
-  local bindings_dir = root_dir .. "../../bindings/terra"
+  local bindings_dir = root_dir .. "../../bindings/terra/"
   local bindings_so = bindings_dir .. "liblegion_terra.so"
   local pennant_cc = root_dir .. "pennant.cc"
   local pennant_so = os.tmpname() .. ".so" -- root_dir .. "pennant.so"

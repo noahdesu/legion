@@ -19,7 +19,7 @@ local ccircuit
 do
   local root_dir = arg[0]:match(".*/") or "./"
   local runtime_dir = root_dir .. "../../runtime"
-  local bindings_dir = root_dir .. "../../bindings/terra"
+  local bindings_dir = root_dir .. "../../bindings/terra/"
   local bindings_so = bindings_dir .. "liblegion_terra.so"
   local circuit_cc = root_dir .. "circuit.cc"
   local circuit_so = os.tmpname() .. ".so" -- root_dir .. "circuit.so"
