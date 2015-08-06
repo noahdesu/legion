@@ -38,6 +38,8 @@ local cpennant
 do
   local root_dir = arg[0]:match(".*/") or "./"
   local runtime_dir = root_dir .. "../../runtime"
+  local bindings_dir = root_dir .. "../../bindings/terra"
+  local bindings_so = binding_dir .. "liblegion_terra.so"
   local pennant_cc = root_dir .. "pennant.cc"
   local pennant_so = os.tmpname() .. ".so" -- root_dir .. "pennant.so"
   local cxx = os.getenv('CXX') or 'c++'
@@ -57,6 +59,7 @@ do
     print("Error: failed to compile " .. pennant_cc)
     assert(false)
   end
+  terralib.linklibrary(bindings_so)
   terralib.linklibrary(pennant_so)
   cpennant = terralib.includec("pennant.h", {"-I", root_dir, "-I", runtime_dir})
 end
