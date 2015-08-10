@@ -681,8 +681,9 @@ namespace Realm {
         diskmem = 0;
 
 #ifdef USE_RADOS
+      // FIXME: pass pool name in at runtime
       RadosMemory *rados_mem = new RadosMemory(ID(ID::ID_MEMORY, gasnet_mynode(),
-            n->memories.size(), 0).convert<Memory>());
+            n->memories.size(), 0).convert<Memory>(), "legion");
       n->memories.push_back(rados_mem);
 #endif
 

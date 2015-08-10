@@ -474,8 +474,92 @@ namespace Realm {
                                                 const std::vector<const char*> &field_files,
                                                 bool read_only) const
     {
-      assert(0);
+#ifndef USE_RADOS
+      assert(false);
       return RegionInstance::NO_INST;
+#else
+      ProfilingRequestSet requests;
+
+      assert(field_sizes.size() == field_files.size());
+
+      Memory memory = Memory::NO_MEMORY;
+      {
+        Machine machine = Machine::get_machine();
+        std::set<Memory> mem;
+        machine.get_all_memories(mem);
+        for(std::set<Memory>::iterator it = mem.begin(); it != mem.end(); it++) {
+          if (it->kind() == Memory::RADOS_MEM) {
+            Memory tmp = *it;
+            RadosMemory *rados_mem = (RadosMemory*)get_runtime()->get_memory_impl(tmp);
+            if (rados_mem->kind == MemoryImpl::MKIND_RADOS) {
+              memory = tmp;
+              break; /* this is usable, take it */
+            }
+          }
+        }
+      }
+      assert(memory.kind() == Memory::RADOS_MEM);
+
+      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+
+      size_t elem_size = 0;
+      for(std::vector<size_t>::const_iterator it = field_sizes.begin();
+          it != field_sizes.end(); it++)
+        elem_size += *it;
+
+      int linearization_bits[RegionInstanceImpl::MAX_LINEARIZATION_LEN];
+      LegionRuntime::Arrays::Rect<1> inst_extent;
+      switch(get_dim()) {
+        case 1:
+          {
+            LegionRuntime::Arrays::FortranArrayLinearization<1> cl(get_rect<1>(), 0);
+            DomainLinearization dl = DomainLinearization::from_mapping<1>(
+                LegionRuntime::Arrays::Mapping<1, 1>::new_dynamic_mapping(cl));
+            inst_extent = cl.image_convex(get_rect<1>());
+            dl.serialize(linearization_bits);
+            break;
+          }
+
+        case 2:
+          {
+            LegionRuntime::Arrays::FortranArrayLinearization<2> cl(get_rect<2>(), 0);
+            DomainLinearization dl = DomainLinearization::from_mapping<2>(
+                LegionRuntime::Arrays::Mapping<2, 1>::new_dynamic_mapping(cl));
+            inst_extent = cl.image_convex(get_rect<2>());
+            dl.serialize(linearization_bits);
+            break;
+          }
+
+        case 3:
+          {
+            LegionRuntime::Arrays::FortranArrayLinearization<3> cl(get_rect<3>(), 0);
+            DomainLinearization dl = DomainLinearization::from_mapping<3>(
+                LegionRuntime::Arrays::Mapping<3, 1>::new_dynamic_mapping(cl));
+            inst_extent = cl.image_convex(get_rect<3>());
+            dl.serialize(linearization_bits);
+            break;
+          }
+
+        default:
+          assert(get_dim() > 0);
+          assert(0);
+      }
+
+      size_t num_elements = inst_extent.volume();
+      size_t inst_bytes = elem_size * num_elements;
+
+      RadosMemory *rados_mem = (RadosMemory*)get_runtime()->get_memory_impl(memory);
+
+      RegionInstance inst = rados_mem->create_instance(get_index_space(),
+          linearization_bits, inst_bytes, 1/*block_size*/, elem_size, field_sizes,
+          0 /*redop_id*/, -1/*list_size*/, requests, RegionInstance::NO_INST,
+          file_name, field_files, *this, read_only);
+
+      log_meta.info("instance created: region=" IDFMT " memory=" IDFMT " id=" IDFMT " bytes=%zd",
+	       this->is_id, memory.id, inst.id, inst_bytes);
+
+      return inst;
+#endif
     }
 
     RegionInstance Domain::create_hdf5_instance(const char *file_name,
