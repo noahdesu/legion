@@ -3275,6 +3275,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    int SingleTask::has_conflicting_regions(AttachRadosOp *attach,
+                                            bool &parent_conflict,
+                                            bool &inline_conflict)
+    //--------------------------------------------------------------------------
+    {
+      const RegionRequirement &req = attach->get_requirement();
+      return has_conflicting_internal(req, parent_conflict, inline_conflict);
+    }
+
+    //--------------------------------------------------------------------------
     int SingleTask::has_conflicting_internal(const RegionRequirement &req,
                                              bool &parent_conflict,
                                              bool &inline_conflict)

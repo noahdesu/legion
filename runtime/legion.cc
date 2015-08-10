@@ -3079,6 +3079,26 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalRegion HighLevelRuntime::attach_rados(Context ctx,
+                                                 const char *file_name,
+                                                 LogicalRegion handle,
+                                                 LogicalRegion parent,
+                                 const std::map<FieldID,const char*> &field_map,
+                                                 LegionFileMode mode)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->attach_rados(ctx, file_name, handle,
+                                  parent, field_map, mode);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::detach_rados(Context ctx, PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      runtime->detach_rados(ctx, region);
+    }
+
+    //--------------------------------------------------------------------------
     void HighLevelRuntime::issue_copy_operation(Context ctx, 
                                                 const CopyLauncher &launcher)
     //--------------------------------------------------------------------------

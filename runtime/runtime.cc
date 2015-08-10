@@ -4789,7 +4789,9 @@ namespace LegionRuntime {
         dependent_partition_op_lock(Reservation::create_reservation()),
         fill_op_lock(Reservation::create_reservation()),
         attach_op_lock(Reservation::create_reservation()),
-        detach_op_lock(Reservation::create_reservation())
+        detach_op_lock(Reservation::create_reservation()),
+        attach_rados_op_lock(Reservation::create_reservation()),
+        detach_rados_op_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
       log_run.debug("Initializing high-level runtime in address space %x",
@@ -5344,6 +5346,26 @@ namespace LegionRuntime {
       available_detach_ops.clear();
       detach_op_lock.destroy_reservation();
       detach_op_lock = Reservation::NO_RESERVATION;
+
+      for (std::deque<AttachRadosOp*>::const_iterator it = 
+            available_attach_rados_ops.begin(); it !=
+            available_attach_rados_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_attach_rados_ops.clear();
+      attach_rados_op_lock.destroy_reservation();
+      attach_rados_op_lock = Reservation::NO_RESERVATION;
+
+      for (std::deque<DetachRadosOp*>::const_iterator it = 
+            available_detach_rados_ops.begin(); it !=
+            available_detach_rados_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_detach_rados_ops.clear();
+      detach_rados_op_lock.destroy_reservation();
+      detach_rados_op_lock = Reservation::NO_RESERVATION;
 
       delete forest;
 
@@ -9810,6 +9832,127 @@ namespace LegionRuntime {
       // Then issue the detach operation
       Processor proc = ctx->get_executing_processor();
       DetachOp *detach_op = get_available_detach_op();
+      detach_op->initialize_detach(ctx, region);
+#ifdef INORDER_EXECUTION
+      Event term_event = detach_op->get_completion_event();
+#endif
+      add_to_dependence_queue(proc, detach_op);
+      // If the region is still mapped, then unmap it
+      if (region.impl->is_mapped())
+      {
+        ctx->unregister_inline_mapped_region(region);
+        region.impl->unmap_region();
+      }
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion Runtime::attach_rados(Context ctx, const char *file_name,
+                                        LogicalRegion handle,
+                                        LogicalRegion parent,
+                                  const std::map<FieldID,const char*> field_map,
+                                        LegionFileMode mode)
+    //--------------------------------------------------------------------------
+    {
+      AttachRadosOp *attach_op = get_available_attach_rados_op(); 
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context attach rados!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal attach rados operation performed in "
+                       "leaf task %s (ID %lld)",
+                       ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      PhysicalRegion result = attach_op->initialize_rados(ctx, file_name,
+                       handle, parent, field_map, mode, check_privileges); 
+#else
+      PhysicalRegion result = attach_op->initialize_rados(ctx, file_name,
+               handle, parent, field_map, mode, false/*check privileges*/);
+#endif
+      bool parent_conflict = false, inline_conflict = false;
+      int index = ctx->has_conflicting_regions(attach_op, parent_conflict,
+                                               inline_conflict);
+      if (parent_conflict)
+      {
+        log_run.error("Attempted an attach rados operation on region " 
+                      "(%x,%x,%x) that conflicts with mapped region " 
+                      "(%x,%x,%x) at index %d of parent task %s (ID %lld) "
+                      "that would ultimately result in deadlock. Instead you "
+                      "receive this error message. Try unmapping the region "
+                      "before invoking attach_hdf5 on file %s",
+                      handle.index_space.id, handle.field_space.id, 
+                      handle.tree_id, ctx->regions[index].region.index_space.id,
+                      ctx->regions[index].region.field_space.id,
+                      ctx->regions[index].region.tree_id, index, 
+                      ctx->variants->name, ctx->get_unique_task_id(), 
+                      file_name);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_CONFLICTING_PARENT_MAPPING_DEADLOCK);
+      }
+      if (inline_conflict)
+      {
+        log_run.error("Attempted an attach rados operation on region " 
+                      "(%x,%x,%x) that conflicts with previous inline "
+                      "mapping in task %s (ID %lld) "
+                      "that would ultimately result in deadlock. Instead you "
+                      "receive this error message. Try unmapping the region "
+                      "before invoking attach_hdf5 on file %s",
+                      handle.index_space.id, handle.field_space.id, 
+                      handle.tree_id, ctx->variants->name, 
+                      ctx->get_unique_task_id(), file_name);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_CONFLICTING_SIBLING_MAPPING_DEADLOCK);
+      }
+      add_to_dependence_queue(ctx->get_executing_processor(), attach_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_executiong)
+        result.wait_until_valid();
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::detach_rados(Context ctx, PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context detach rados!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal detach radosoperation performed in "
+                       "leaf task %s (ID %lld)",
+                       ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      
+      // Then issue the detach operation
+      Processor proc = ctx->get_executing_processor();
+      DetachRadosOp *detach_op = get_available_detach_rados_op();
       detach_op->initialize_detach(ctx, region);
 #ifdef INORDER_EXECUTION
       Event term_event = detach_op->get_completion_event();
@@ -14477,6 +14620,50 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    AttachRadosOp* Runtime::get_available_attach_rados_op(void)
+    //--------------------------------------------------------------------------
+    {
+      AttachRadosOp *result = NULL;
+      {
+        AutoLock a_lock(attach_rados_op_lock);
+        if (!available_attach_rados_ops.empty())
+        {
+          result = available_attach_rados_ops.front();
+          available_attach_rados_ops.pop_front();
+        }
+      }
+      if (result == NULL)
+        result = legion_new<AttachRadosOp>(this);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      result->activate();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    DetachRadosOp* Runtime::get_available_detach_rados_op(void)
+    //--------------------------------------------------------------------------
+    {
+      DetachRadosOp *result = NULL;
+      {
+        AutoLock d_lock(detach_rados_op_lock);
+        if (!available_detach_rados_ops.empty())
+        {
+          result = available_detach_rados_ops.front();
+          available_detach_rados_ops.pop_front();
+        }
+      }
+      if (result == NULL)
+        result = legion_new<DetachRadosOp>(this);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      result->activate();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::free_individual_task(IndividualTask *task)
     //--------------------------------------------------------------------------
     {
@@ -14741,6 +14928,22 @@ namespace LegionRuntime {
     {
       AutoLock d_lock(detach_op_lock);
       available_detach_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_detach_rados_op(DetachRadosOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock d_lock(detach_rados_op_lock);
+      available_detach_rados_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_attach_rados_op(AttachRadosOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock a_lock(attach_rados_op_lock);
+      available_attach_rados_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
