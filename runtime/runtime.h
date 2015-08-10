@@ -1392,6 +1392,12 @@ namespace LegionRuntime {
                                  const std::map<FieldID,const char*> field_map,
                                  LegionFileMode);
       void detach_hdf5(Context ctx, PhysicalRegion region);
+
+      PhysicalRegion attach_rados(Context ctx, const char *file_name,
+                                 LogicalRegion handle, LogicalRegion parent,
+                                 const std::map<FieldID,const char*> field_map,
+                                 LegionFileMode);
+      void detach_rados(Context ctx, PhysicalRegion region);
     public:
       void issue_copy_operation(Context ctx, const CopyLauncher &launcher);
     public:
@@ -1872,6 +1878,8 @@ namespace LegionRuntime {
       FillOp*               get_available_fill_op(void);
       AttachOp*             get_available_attach_op(void);
       DetachOp*             get_available_detach_op(void);
+      AttachRadosOp*        get_available_attach_rados_op(void);
+      DetachRadosOp*        get_available_detach_rados_op(void);
     public:
       void free_individual_task(IndividualTask *task);
       void free_point_task(PointTask *task);
@@ -1901,6 +1909,8 @@ namespace LegionRuntime {
       void free_fill_op(FillOp *op);
       void free_attach_op(AttachOp *op);
       void free_detach_op(DetachOp *op);
+      void free_attach_rados_op(AttachRadosOp *op);
+      void free_detach_rados_op(DetachRadosOp *op);
     public:
       RemoteTask* find_or_init_remote_context(UniqueID uid); 
       bool is_local(Processor proc) const;
@@ -2104,6 +2114,8 @@ namespace LegionRuntime {
       Reservation fill_op_lock;
       Reservation attach_op_lock;
       Reservation detach_op_lock;
+      Reservation attach_rados_op_lock;
+      Reservation detach_rados_op_lock;
     protected:
       std::deque<IndividualTask*>       available_individual_tasks;
       std::deque<PointTask*>            available_point_tasks;
@@ -2133,6 +2145,8 @@ namespace LegionRuntime {
       std::deque<FillOp*>               available_fill_ops;
       std::deque<AttachOp*>             available_attach_ops;
       std::deque<DetachOp*>             available_detach_ops;
+      std::deque<AttachRadosOp*>        available_attach_rados_ops;
+      std::deque<DetachRadosOp*>        available_detach_rados_ops;
 #if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
       TreeStateLogger *tree_state_logger;
       // For debugging purposes keep track of
