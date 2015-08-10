@@ -469,6 +469,15 @@ namespace Realm {
       return i;
     }
 
+    RegionInstance Domain::create_rados_instance(const char *file_name,
+                                                const std::vector<size_t> &field_sizes,
+                                                const std::vector<const char*> &field_files,
+                                                bool read_only) const
+    {
+      assert(0);
+      return RegionInstance::NO_INST;
+    }
+
     RegionInstance Domain::create_hdf5_instance(const char *file_name,
                                                 const std::vector<size_t> &field_sizes,
                                                 const std::vector<const char*> &field_files,

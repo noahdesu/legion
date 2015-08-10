@@ -4310,6 +4310,19 @@ namespace LegionRuntime {
        * @param region the physical region for an HDF5 file to detach
        */
       void detach_hdf5(Context ctx, PhysicalRegion region);
+
+      /**
+       *
+       */
+      PhysicalRegion attach_rados(Context ctx, const char *file_name,
+                                 LogicalRegion handle, LogicalRegion parent,
+                                 const std::map<FieldID,const char*> &field_map,
+                                 LegionFileMode mode);
+
+      /**
+       *
+       */
+      void detach_rados(Context ctx, PhysicalRegion region);
     public:
       //------------------------------------------------------------------------
       // Copy Operations

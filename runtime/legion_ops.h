@@ -57,6 +57,8 @@ namespace LegionRuntime {
         FILL_OP_KIND,
         ATTACH_OP_KIND,
         DETACH_OP_KIND,
+        ATTACH_RADOS_OP_KIND,
+        DETACH_RADOS_OP_KIND,
         TRACE_CAPTURE_OP_KIND,
         TRACE_COMPLETE_OP_KIND,
         TASK_OP_KIND,
@@ -84,6 +86,8 @@ namespace LegionRuntime {
         "Fill",                     \
         "Attach",                   \
         "Detach",                   \
+        "AttachRados",              \
+        "DetachRados",              \
         "Trace Capture",            \
         "Trace Complete",           \
         "Task",                     \
@@ -1712,6 +1716,86 @@ namespace LegionRuntime {
       virtual ~DetachOp(void);
     public:
       DetachOp& operator=(const DetachOp &rhs);
+    public:
+      void initialize_detach(SingleTask *ctx, PhysicalRegion region);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual bool trigger_execution(void);
+      virtual unsigned find_parent_index(unsigned idx);
+    protected:
+      void compute_parent_index(void);
+    public:
+      InstanceRef reference;
+      RegionRequirement requirement;
+      RegionTreePath privilege_path;
+      RestrictInfo restrict_info;
+      unsigned parent_req_index;
+    };
+
+    /**
+     * \class AttachRadosOp
+     * Operation for attaching a rados object to a physical instance
+     */
+    class AttachRadosOp : public Operation {
+    public:
+      static const AllocationType alloc_type = ATTACH_RADOS_OP_ALLOC;
+    public:
+      AttachRadosOp(Runtime *rt);
+      AttachRadosOp(const AttachRadosOp &rhs);
+      virtual ~AttachRadosOp(void);
+    public:
+      AttachRadosOp& operator=(const AttachRadosOp &rhs);
+    public:
+      PhysicalRegion initialize_rados(SingleTask *ctx, const char *file_name,
+                                 LogicalRegion handle, LogicalRegion parent,
+                                 const std::map<FieldID,const char*> &field_map,
+                                 LegionFileMode mode, bool check_privileges);
+      inline const RegionRequirement& get_requirement(void) const 
+        { return requirement; }
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual bool trigger_execution(void);
+      virtual unsigned find_parent_index(unsigned idx);
+    public:
+      PhysicalInstance create_instance(const Domain &dom, 
+                                       const std::vector<size_t> &field_sizes);
+    protected:
+      void check_privilege(void);
+      void compute_parent_index(void);
+    public:
+      RegionRequirement requirement;
+      RegionTreePath privilege_path;
+      RestrictInfo restrict_info;
+      const char *file_name;
+      std::map<FieldID,const char*> field_map;
+      LegionFileMode file_mode;
+      PhysicalRegion region;
+      unsigned parent_req_index;
+    };
+
+    /**
+     * \class Detach Op
+     * Operation for detaching a rados object from a physical instance
+     */
+    class DetachRadosOp : public Operation {
+    public:
+      static const AllocationType alloc_type = DETACH_RADOS_OP_ALLOC;
+    public:
+      DetachRadosOp(Runtime *rt);
+      DetachRadosOp(const DetachRadosOp &rhs);
+      virtual ~DetachRadosOp(void);
+    public:
+      DetachRadosOp& operator=(const DetachRadosOp &rhs);
     public:
       void initialize_detach(SingleTask *ctx, PhysicalRegion region);
     public:
