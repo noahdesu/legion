@@ -28,6 +28,10 @@
 #include "event_impl.h"
 #include "rsrv_impl.h"
 
+#ifdef USE_RADOS
+#include <rados/librados.hpp>
+#endif
+
 #ifdef USE_CUDA
 namespace LegionRuntime {
   namespace LowLevel {
@@ -281,7 +285,7 @@ namespace Realm {
 #ifdef USE_RADOS
     class RadosMemory : public MemoryImpl {
      public:
-      explicit RadosMemory(Memory m);
+      explicit RadosMemory(Memory m, const std::string pool);
       virtual ~RadosMemory();
 
       virtual RegionInstance create_instance(IndexSpace is,
@@ -294,6 +298,21 @@ namespace Realm {
           off_t list_size,
           const ProfilingRequestSet &reqs,
           RegionInstance parent_inst);
+
+      RegionInstance create_instance(IndexSpace is,
+          const int *linearization_bits,
+          size_t bytes_needed,
+          size_t block_size,
+          size_t element_size,
+          const std::vector<size_t>& field_sizes,
+          ReductionOpID redopid,
+          off_t list_size,
+          const ProfilingRequestSet &reqs,
+          RegionInstance parent_inst,
+          const char* file,
+          const std::vector<const char*>& path_names,
+          Domain domain,
+          bool read_only);
 
       virtual void destroy_instance(RegionInstance i,
           bool local_destroy);
@@ -309,6 +328,21 @@ namespace Realm {
       virtual void *get_direct_ptr(off_t offset, size_t size);
 
       virtual int get_home_node(off_t offset, size_t size);
+
+      struct RadosMemoryInst {
+        bool read_only;
+        RadosMemory *memory;
+        std::string file;
+      };
+
+      RadosMemoryInst *get_specific_instance(RegionInstance inst);
+
+     private:
+      pthread_mutex_t lock;
+      std::map<ID::IDType, RadosMemoryInst*> instances;
+
+      librados::Rados cluster;
+      librados::IoCtx ioctx;
     };
 #endif
 
