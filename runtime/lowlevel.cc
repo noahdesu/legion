@@ -1295,6 +1295,11 @@ namespace LegionRuntime {
 #ifdef BOUNDS_CHECKS
       check_bounds(region, dp);
 #endif
+#ifdef USE_RADOS
+      if (impl->memory.kind() == Memory::RADOS_MEM) {
+        assert(0);
+      }
+#endif
 #ifdef USE_HDF
       // we can directly access HDF memory by domain point
       if (impl->memory.kind() == Memory::HDF_MEM) {
@@ -1361,6 +1366,11 @@ namespace LegionRuntime {
 #endif
 #ifdef BOUNDS_CHECKS
       check_bounds(region, dp);
+#endif
+#ifdef USE_RADOS
+      if (impl->memory.kind() == Memory::RADOS_MEM) {
+        assert(0);
+      }
 #endif
 #ifdef USE_HDF
       if (impl->memory.kind() == Memory::HDF_MEM) {
