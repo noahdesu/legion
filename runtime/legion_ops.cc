@@ -9324,6 +9324,566 @@ namespace LegionRuntime {
         parent_req_index = unsigned(parent_index);
     }
 
+    ///////////////////////////////////////////////////////////// 
+    // Attach Rados Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    AttachRadosOp::AttachRadosOp(Runtime *rt)
+      : Operation(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    AttachRadosOp::AttachRadosOp(const AttachRadosOp &rhs)
+      : Operation(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // Should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    AttachRadosOp::~AttachRadosOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    AttachRadosOp& AttachRadosOp::operator=(const AttachRadosOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // Should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion AttachRadosOp::initialize_rados(SingleTask *ctx, 
+                                             const char *name,
+                                             LogicalRegion handle, 
+                                             LogicalRegion parent,
+                                             const std::map<FieldID,const char*> &fmap,
+                                             LegionFileMode mode,
+                                             bool check_privileges)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      if (fmap.empty())
+      {
+        log_run.warning("WARNING: ATTACH RADOS OPERATION ISSUED WITH NO "
+                        "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
+                        "FORGET THEM?!?", parent_ctx->variants->name,
+                        parent_ctx->get_unique_task_id());
+
+      }
+      file_name = strdup(name);
+      // Construct the region requirement for this task
+      requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
+      for (std::map<FieldID,const char*>::const_iterator it = fmap.begin();
+            it != fmap.end(); it++)
+      {
+        requirement.add_field(it->first);
+        field_map[it->first] = strdup(it->second);
+      }
+      file_mode = mode;
+      // This instance is not automatically mapped
+      region = PhysicalRegion(legion_new<PhysicalRegion::Impl>(requirement,
+                              completion_event, false/*mapped*/, ctx,
+                              0/*map id*/, 0/*tag*/, false/*leaf*/, runtime));
+      if (check_privileges)
+        check_privilege();
+      initialize_privilege_path(privilege_path, requirement);
+      return region;
+    }
+
+    //--------------------------------------------------------------------------
+    void AttachRadosOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation();
+      file_name = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void AttachRadosOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_operation();
+      if (file_name != NULL)
+      {
+        free(const_cast<char*>(file_name));
+        file_name = NULL;
+      }
+      for (std::map<FieldID,const char*>::const_iterator it = field_map.begin();
+            it != field_map.end(); it++)
+      {
+        free(const_cast<char*>(it->second));
+      }
+      field_map.clear();
+      region = PhysicalRegion();
+      privilege_path.clear();
+      restrict_info.clear();
+      runtime->free_attach_rados_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* AttachRadosOp::get_logging_name(void)
+    //--------------------------------------------------------------------------
+    {
+      return op_names[ATTACH_RADOS_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind AttachRadosOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return ATTACH_RADOS_OP_KIND;
+    }
+    
+    //--------------------------------------------------------------------------
+    void AttachRadosOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_LOGGING
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
+                                      unique_op_id, BEGIN_DEPENDENCE_ANALYSIS);
+#endif
+#ifdef OLD_LEGION_PROF
+      LegionProf::register_event(unique_op_id, PROF_BEGIN_DEP_ANALYSIS);
+#endif
+      // First compute the parent index
+      compute_parent_index();
+      begin_dependence_analysis();
+      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
+                                                   requirement,
+                                                   restrict_info, 
+                                                   privilege_path);
+      // If we have any restriction on ourselves, that is very bad
+      if (restrict_info.has_restrictions())
+      {
+        log_run.error("Illegal rados attachment for rados %s performed on "
+                      "logical region (%x,%x,%x) which is under "
+                      "restricted coherence! User coherence must first "
+                      "be acquired with an acquire operation before "
+                      "attachment can be performed.", file_name,
+                      requirement.region.index_space.id,
+                      requirement.region.field_space.id,
+                      requirement.region.tree_id);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_ILLEGAL_RADOS_ATTACH);
+      }
+      // After we are done with our dependence analysis, then we 
+      // need to add restricted coherence on the logical region 
+      runtime->forest->restrict_user_coherence(parent_ctx, requirement.region,
+                                               requirement.privilege_fields);
+      end_dependence_analysis();
+#ifdef LEGION_LOGGING
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
+                                      unique_op_id, END_DEPENDENCE_ANALYSIS);
+#endif
+#ifdef OLD_LEGION_PROF
+      LegionProf::register_event(unique_op_id, PROF_END_DEP_ANALYSIS);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    bool AttachRadosOp::trigger_execution(void)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeContext physical_ctx = 
+        parent_ctx->find_enclosing_physical_context(parent_req_index);
+      if (!requirement.premapped)
+      {
+        Processor local_proc = parent_ctx->get_executing_processor();
+        requirement.premapped = runtime->forest->premap_physical_region(
+                  physical_ctx, privilege_path, requirement,
+                  this, parent_ctx, local_proc
+#ifdef DEBUG_HIGH_LEVEL
+                  , 0/*idx*/, get_logging_name(), unique_op_id
+#endif
+                  );
+      }
+      if (!requirement.premapped)
+        return false;
+      InstanceRef result = runtime->forest->attach_rados(physical_ctx,
+                                                        requirement, this);
+      // This operation is ready once the file is attached
+      region.impl->set_reference(result);
+      // Once we have created the instance, then we are done
+      complete_mapping();
+      complete_execution();
+      // Should always succeed
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned AttachRadosOp::find_parent_index(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx == 0);
+#endif
+      return parent_req_index;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance AttachRadosOp::create_instance(const Domain &dom,
+                                               const std::vector<size_t> &sizes)
+    //--------------------------------------------------------------------------
+    {
+      // First build the set of field paths
+      std::vector<const char*> field_files(field_map.size());
+      unsigned idx = 0;
+      for (std::map<FieldID,const char*>::const_iterator it = field_map.begin();
+            it != field_map.end(); it++, idx++)
+      {
+        field_files[idx] = it->second;
+      }
+      // Now ask the low-level runtime to create the instance  
+      PhysicalInstance result = dom.create_rados_instance(file_name, sizes,
+                             field_files, (file_mode == LEGION_FILE_READ_ONLY));
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result.exists());
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void AttachRadosOp::check_privilege(void)
+    //--------------------------------------------------------------------------
+    {
+      FieldID bad_field;
+      LegionErrorType et = runtime->verify_requirement(requirement, bad_field);
+      // If that worked, then check the privileges with the parent context
+      if (et == NO_ERROR)
+        et = parent_ctx->check_privilege(requirement, bad_field);
+      switch (et)
+      {
+        // Not there is no such things as bad privileges for 
+        // acquires and releases because they are controlled by the runtime
+        case NO_ERROR:
+        case ERROR_BAD_REGION_PRIVILEGES:
+          break;
+        case ERROR_INVALID_REGION_HANDLE:
+          {
+            log_region.error("Requirest for invalid region handle "
+                                   "(%x,%d,%d) for attach rados operation "
+                                   "(ID %lld)",
+                                   requirement.region.index_space.id, 
+                                   requirement.region.field_space.id, 
+                                   requirement.region.tree_id, 
+                                   unique_op_id);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_INVALID_REGION_HANDLE);
+          }
+        case ERROR_FIELD_SPACE_FIELD_MISMATCH:
+          {
+            FieldSpace sp = (requirement.handle_type == SINGULAR) || 
+                            (requirement.handle_type == REG_PROJECTION)
+                             ? requirement.region.field_space : 
+                               requirement.partition.field_space;
+            log_region.error("Field %d is not a valid field of field "
+                                   "space %d for attach rados operation (ID %lld)",
+                                   bad_field, sp.id, unique_op_id);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_FIELD_SPACE_FIELD_MISMATCH);
+          }
+        case ERROR_INVALID_INSTANCE_FIELD:
+          {
+            log_region.error("Instance field %d is not one of the "
+                                   "privilege fields for attach rados operation "
+                                   "(ID %lld)",
+                                    bad_field, unique_op_id);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_INVALID_INSTANCE_FIELD);
+          }
+        case ERROR_DUPLICATE_INSTANCE_FIELD:
+          {
+            log_region.error("Instance field %d is a duplicate for "
+                                    "attach rados operation (ID %lld)",
+                                    bad_field, unique_op_id);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_DUPLICATE_INSTANCE_FIELD);
+          }
+        case ERROR_BAD_PARENT_REGION:
+          {
+            log_region.error("Parent task %s (ID %lld) of attach rados operation "
+                                   "(ID %lld) does not have a region "
+                                   "requirement for region (%x,%x,%x) "
+                                   "as a parent of region requirement",
+                                   parent_ctx->variants->name, 
+                                   parent_ctx->get_unique_task_id(),
+                                   unique_op_id, 
+                                   requirement.region.index_space.id,
+                                   requirement.region.field_space.id, 
+                                   requirement.region.tree_id);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_BAD_PARENT_REGION);
+          }
+        case ERROR_BAD_REGION_PATH:
+          {
+            log_region.error("Region (%x,%x,%x) is not a "
+                                   "sub-region of parent region "
+                                   "(%x,%x,%x) for region requirement of attach "
+                                   "rados operation (ID %lld)",
+                                   requirement.region.index_space.id,
+                                   requirement.region.field_space.id, 
+                                   requirement.region.tree_id,
+                                   requirement.parent.index_space.id,
+                                   requirement.parent.field_space.id,
+                                   requirement.parent.tree_id,
+                                   unique_op_id);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_BAD_REGION_PATH);
+          }
+        case ERROR_BAD_REGION_TYPE:
+          {
+            log_region.error("Region requirement of attach rados operation "
+                                   "(ID %lld) cannot find privileges for field "
+                                   "%d in parent task",
+                                   unique_op_id, bad_field);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_BAD_REGION_TYPE);
+          }
+        // this should never happen with an inline mapping
+        case ERROR_NON_DISJOINT_PARTITION: 
+        default:
+          assert(false); // Should never happen
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void AttachRadosOp::compute_parent_index(void)
+    //--------------------------------------------------------------------------
+    {
+      int parent_index = parent_ctx->find_parent_region_req(requirement);
+      if (parent_index < 0)
+      {
+        log_region.error("Parent task %s (ID %lld) of attach rados "
+                               "operation (ID %lld) does not have a region "
+                               "requirement for region (%x,%x,%x) as a parent",
+                               parent_ctx->variants->name, 
+                               parent_ctx->get_unique_task_id(),
+                               unique_op_id, 
+                               requirement.region.index_space.id,
+                               requirement.region.field_space.id, 
+                               requirement.region.tree_id);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_BAD_PARENT_REGION);
+      }
+      else
+        parent_req_index = unsigned(parent_index);
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Detach Rados Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    DetachRadosOp::DetachRadosOp(Runtime *rt)
+      : Operation(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    DetachRadosOp::DetachRadosOp(const DetachRadosOp &rhs)
+      : Operation(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    DetachRadosOp::~DetachRadosOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    DetachRadosOp& DetachRadosOp::operator=(const DetachRadosOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void DetachRadosOp::initialize_detach(SingleTask *ctx, PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      reference = region.impl->get_reference();
+      // No need to check privileges because we never would have been
+      // able to attach in the first place anyway.
+      requirement.copy_without_mapping_info(region.impl->get_requirement());
+      initialize_privilege_path(privilege_path, requirement);
+      // Check that this is actually a file
+      LogicalView *view = reference.get_handle().get_view();
+      PhysicalManager *manager = view->get_manager();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!manager->is_reduction_manager()); 
+#endif
+      InstanceManager *inst_manager = manager->as_instance_manager(); 
+      if (!inst_manager->is_attached_rados())
+      {
+        log_run.error("Illegal detach operation on a physical region which "
+                      "was not attached!");
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_ILLEGAL_DETACH_OPERATION);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DetachRadosOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void DetachRadosOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_operation();
+      reference = InstanceRef();
+      privilege_path.clear();
+      restrict_info.clear();
+      runtime->free_detach_rados_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* DetachRadosOp::get_logging_name(void)
+    //--------------------------------------------------------------------------
+    {
+      return op_names[DETACH_RADOS_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind DetachRadosOp::get_operation_kind(void)
+    //--------------------------------------------------------------------------
+    {
+      return DETACH_RADOS_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void DetachRadosOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_LOGGING
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
+                                      unique_op_id, BEGIN_DEPENDENCE_ANALYSIS);
+#endif
+#ifdef OLD_LEGION_PROF
+      LegionProf::register_event(unique_op_id, PROF_BEGIN_DEP_ANALYSIS);
+#endif
+      // First compute the parent index
+      compute_parent_index();
+      begin_dependence_analysis();
+      // Before we do our dependence analysis, we can remove the 
+      // restricted coherence on the logical region
+      runtime->forest->acquire_user_coherence(parent_ctx, requirement.region,
+                                              requirement.privilege_fields);
+      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
+                                                   requirement, 
+                                                   restrict_info,
+                                                   privilege_path);
+      end_dependence_analysis();
+#ifdef LEGION_LOGGING
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
+                                      unique_op_id, END_DEPENDENCE_ANALYSIS);
+#endif
+#ifdef OLD_LEGION_PROF
+      LegionProf::register_event(unique_op_id, PROF_END_DEP_ANALYSIS);
+#endif
+
+    }
+    
+    //--------------------------------------------------------------------------
+    bool DetachRadosOp::trigger_execution(void)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeContext physical_ctx = 
+        parent_ctx->find_enclosing_physical_context(parent_req_index);
+      if (!requirement.premapped)
+      {
+        Processor local_proc = parent_ctx->get_executing_processor();
+        requirement.premapped = runtime->forest->premap_physical_region(
+                  physical_ctx, privilege_path, requirement,
+                  this, parent_ctx, local_proc
+#ifdef DEBUG_HIGH_LEVEL
+                  , 0/*idx*/, get_logging_name(), unique_op_id
+#endif
+                  );
+      }
+      if (!requirement.premapped)
+        return false;
+      runtime->forest->detach_rados(physical_ctx, requirement, reference);
+      complete_mapping();
+      complete_execution();
+      // This should always succeed
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned DetachRadosOp::find_parent_index(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx == 0);
+#endif
+      return parent_req_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void DetachRadosOp::compute_parent_index(void)
+    //--------------------------------------------------------------------------
+    {
+      int parent_index = parent_ctx->find_parent_region_req(requirement);
+      if (parent_index < 0)
+      {
+        log_region.error("Parent task %s (ID %lld) of detach rados "
+                               "operation (ID %lld) does not have a region "
+                               "requirement for region (%x,%x,%x) as a parent",
+                               parent_ctx->variants->name, 
+                               parent_ctx->get_unique_task_id(),
+                               unique_op_id, 
+                               requirement.region.index_space.id,
+                               requirement.region.field_space.id, 
+                               requirement.region.tree_id);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_BAD_PARENT_REGION);
+      }
+      else
+        parent_req_index = unsigned(parent_index);
+    }
+
   }; // namespace LegionRuntime
 }; // namespace HighLevel
 

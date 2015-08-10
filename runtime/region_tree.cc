@@ -2594,6 +2594,43 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    InstanceRef RegionTreeForest::attach_rados(RegionTreeContext ctx,
+                                              const RegionRequirement &req,
+                                              AttachRadosOp *attach_op)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *attach_node = get_node(req.region);
+      FieldMask attach_mask = 
+        attach_node->column_source->get_field_mask(req.privilege_fields);
+      // Perform the attachment
+      return attach_node->attach_rados(ctx.get_id(), attach_mask,
+                                      req, attach_op);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::detach_rados(RegionTreeContext ctx,
+                                       const RegionRequirement &req,
+                                       const InstanceRef &ref)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *detach_node = get_node(req.region);
+      FieldMask detach_mask = 
+        detach_node->column_source->get_field_mask(req.privilege_fields);
+      LogicalView *view = ref.get_handle().get_view();
+      PhysicalManager *manager = view->get_manager();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!manager->is_reduction_manager()); 
+#endif
+      detach_node->detach_rados(ctx.get_id(), detach_mask, manager); 
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::send_physical_state(RegionTreeContext ctx,
                                                const RegionRequirement &req,
                                                StateDirectory *directory,
@@ -9248,6 +9285,64 @@ namespace LegionRuntime {
                                          location, inst, node, layout,
                                          Event::NO_EVENT, node->get_depth(),
                                          InstanceManager::ATTACH_FILE_FLAG);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+#ifdef OLD_LEGION_PROF
+      {
+        std::map<FieldID,size_t> inst_fields;
+        for (std::set<FieldID>::const_iterator it =
+            create_fields.begin(); it != create_fields.end(); it++)
+        {
+          std::map<FieldID,FieldInfo>::const_iterator finder =
+            fields.find(*it);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(finder != fields.end());
+#endif
+          inst_fields[*it] = finder->second.field_size;
+        }
+        LegionProf::register_instance_creation(inst.id, location.id,
+            0, blocking_factor, inst_fields);
+      }
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceManager* FieldSpaceNode::create_rados_instance(
+                                         const std::set<FieldID> &create_fields, 
+                                         const FieldMask &attach_mask,
+                                         RegionNode *node, AttachRadosOp *attach_op)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<size_t> field_sizes(create_fields.size());
+      std::vector<unsigned> indexes(create_fields.size());
+      compute_create_offsets(create_fields, field_sizes, indexes);
+      // Now make the instance, this should always succeed
+      const Domain &dom = node->get_domain_blocking();
+      PhysicalInstance inst = attach_op->create_instance(dom, field_sizes);
+      // Assume that everything is SOA for files right now
+      size_t blocking_factor = dom.get_volume();
+      // Get the layout
+      LayoutDescription *layout = 
+        find_layout_description(attach_mask, dom, blocking_factor);
+      if (layout == NULL)
+        layout = create_layout_description(attach_mask, dom,
+                                           blocking_factor,
+                                           create_fields,
+                                           field_sizes,
+                                           indexes);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(layout != NULL);
+#endif
+      DistributedID did = context->runtime->get_available_distributed_id();
+      Memory location = inst.get_location();
+      InstanceManager *result = legion_new<InstanceManager>(context, did, 
+                                         context->runtime->address_space,
+                                         context->runtime->address_space,
+                                         location, inst, node, layout,
+                                         Event::NO_EVENT, node->get_depth(),
+                                         InstanceManager::ATTACH_RADOS_FLAG);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -17480,6 +17575,48 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    InstanceRef RegionNode::attach_rados(ContextID ctx, 
+                                        const FieldMask &attach_mask,
+                                        const RegionRequirement &req,
+                                        AttachRadosOp *attach_op)
+    //--------------------------------------------------------------------------
+    {
+      // First do any invalidations from this node for the fields that 
+      // are being written to because this is the new version
+      PhysicalInvalidator invalidator(ctx, attach_mask,
+                                      false/*force invalidate*/);
+      visit_node(&invalidator);
+      // Create a new instance view based on the file
+      InstanceManager *manager = 
+        column_source->create_rados_instance(req.privilege_fields,
+                                            attach_mask, this, attach_op);
+      // Wrap it in a view
+      MaterializedView *view = manager->create_top_view(row_source->depth);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(view != NULL);
+#endif
+      // Update the physical state with the new instance
+      PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
+      update_valid_views(state, attach_mask, false/*dirty*/, view);
+      release_physical_state(state);
+      // Return the resulting instance
+      return InstanceRef(Event::NO_EVENT, ViewHandle(view));
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionNode::detach_rados(ContextID ctx, const FieldMask &detach_mask,
+                                 PhysicalManager *detach_target)
+    //--------------------------------------------------------------------------
+    {
+      // Detach any instance views from this node down
+      PhysicalDetacher detacher(ctx, detach_mask, detach_target);
+      visit_node(&detacher);
+#ifdef OLD_LEGION_PROF
+      LegionProf::register_instance_deletion(detach_target->get_instance().id);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     bool RegionNode::send_state(ContextID ctx, UniqueID remote_owner_uid, 
                                 AddressSpaceID target,
                                 const FieldMask &send_mask, bool invalidate,
@@ -20367,6 +20504,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return (instance_flags & ATTACH_FILE_FLAG);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InstanceManager::is_attached_rados(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (instance_flags & ATTACH_RADOS_FLAG);
     }
 
     /////////////////////////////////////////////////////////////

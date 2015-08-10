@@ -367,6 +367,8 @@ namespace LegionRuntime {
                                   bool &inline_conflict);
       int has_conflicting_regions(AttachOp *attach, bool &parent_conflict,
                                   bool &inline_conflict);
+      int has_conflicting_regions(AttachRadosOp *attach, bool &parent_conflict,
+                                  bool &inline_conflict);
       int has_conflicting_internal(const RegionRequirement &req, 
                                    bool &parent_conflict,
                                    bool &inline_conflict);

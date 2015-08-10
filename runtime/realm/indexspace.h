@@ -910,6 +910,11 @@ namespace Realm {
                                      const ProfilingRequestSet &reqs,
 				     ReductionOpID redop_id = 0) const;
 
+      RegionInstance create_rados_instance(const char *file_name,
+                                          const std::vector<size_t> &field_sizes,
+                                          const std::vector<const char*> &field_files,
+                                          bool read_only) const;
+
       RegionInstance create_hdf5_instance(const char *file_name,
                                           const std::vector<size_t> &field_sizes,
                                           const std::vector<const char*> &field_files,

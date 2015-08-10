@@ -416,6 +416,12 @@ namespace LegionRuntime {
       void detach_file(RegionTreeContext ctx, 
                        const RegionRequirement &req,
                        const InstanceRef &ref);
+      InstanceRef attach_rados(RegionTreeContext ctx,
+                              const RegionRequirement &req,
+                              AttachRadosOp *attach_op);
+      void detach_rados(RegionTreeContext ctx, 
+                       const RegionRequirement &req,
+                       const InstanceRef &ref);
     public:
       // Methods for sending and returning state information
       void send_physical_state(RegionTreeContext ctx,
@@ -1398,6 +1404,9 @@ namespace LegionRuntime {
       InstanceManager* create_file_instance(const std::set<FieldID> &fields,
                                             const FieldMask &attach_mask,
                                             RegionNode *node, AttachOp *op);
+      InstanceManager* create_rados_instance(const std::set<FieldID> &fields,
+                                            const FieldMask &attach_mask,
+                                            RegionNode *node, AttachRadosOp *op);
     public:
       LayoutDescription* find_layout_description(const FieldMask &mask,
                                                  const Domain &domain,
@@ -2486,6 +2495,10 @@ namespace LegionRuntime {
                              const RegionRequirement &req, AttachOp *attach_op);
       void detach_file(ContextID ctx, const FieldMask &detach_mask,
                        PhysicalManager *detach_target);
+      InstanceRef attach_rados(ContextID ctx, const FieldMask &attach_mask,
+                             const RegionRequirement &req, AttachRadosOp *attach_op);
+      void detach_rados(ContextID ctx, const FieldMask &detach_mask,
+                       PhysicalManager *detach_target);
     public:
       bool send_state(ContextID ctx, UniqueID remote_owner_uid,
                       AddressSpaceID target,
@@ -3267,6 +3280,7 @@ namespace LegionRuntime {
         NO_INSTANCE_FLAG = 0x00000000,
         PERSISTENT_FLAG  = 0x00000001,
         ATTACH_FILE_FLAG = 0x00000002,
+        ATTACH_RADOS_FLAG = 0x00000004,
       };
     public:
       InstanceManager(RegionTreeForest *ctx, DistributedID did,
@@ -3328,6 +3342,7 @@ namespace LegionRuntime {
                                          AddressSpaceID source);
     public:
       bool is_attached_file(void) const;
+      bool is_attached_rados(void) const;
     public:
       RegionNode *const region_node;
       LayoutDescription *const layout;
