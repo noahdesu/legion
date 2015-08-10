@@ -21,6 +21,9 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
+#ifdef USE_RADOS
+#include <rados/librados.hpp>
+#endif
 
 namespace Realm {
   
@@ -131,9 +134,22 @@ namespace Realm {
     }
 
 #ifdef USE_RADOS
-    RadosMemory::RadosMemory(Memory m)
+    RadosMemory::RadosMemory(Memory m, const std::string pool)
       : MemoryImpl(m, 0, MKIND_RADOS, 256, Memory::RADOS_MEM)
-    {}
+    {
+      cluster.init(NULL);
+      // FIXME: how to inject env vars through gasnet?
+      cluster.conf_read_file("/home/nwatkins/ceph/src/ceph.conf");
+      cluster.conf_parse_env(NULL);
+      int ret = cluster.connect();
+      assert(ret == 0);
+
+      ret = cluster.ioctx_create(pool.c_str(), ioctx);
+      assert(ret == 0);
+
+      ret = pthread_mutex_init(&lock, NULL);
+      assert(ret == 0);
+    }
 
     RadosMemory::~RadosMemory()
     {}
@@ -153,6 +169,53 @@ namespace Realm {
       return RegionInstance::NO_INST;
     }
 
+    RegionInstance RadosMemory::create_instance(IndexSpace is,
+        const int *linearization_bits,
+        size_t bytes_needed,
+        size_t block_size,
+        size_t element_size,
+        const std::vector<size_t>& field_sizes,
+        ReductionOpID redopid,
+        off_t list_size,
+        const ProfilingRequestSet &reqs,
+        RegionInstance parent_inst,
+        const char* file,
+        const std::vector<const char*>& path_names,
+        Domain domain,
+        bool read_only)
+    {
+      RegionInstance inst = create_instance_local(is,
+                 linearization_bits, bytes_needed,
+                 block_size, element_size, field_sizes, redopid,
+                 list_size, reqs, parent_inst);
+
+      RadosMemoryInst *rinst = new RadosMemoryInst;
+      rinst->read_only = read_only;
+      rinst->memory = this;
+      rinst->file = std::string(file);
+
+      pthread_mutex_lock(&lock);
+
+      assert(instances.find(ID(inst).id()) == instances.end());
+      instances[ID(inst).id()] = rinst;
+
+      pthread_mutex_unlock(&lock);
+
+      return inst;
+    }
+
+    RadosMemory::RadosMemoryInst *RadosMemory::get_specific_instance(RegionInstance inst)
+    {
+      RadosMemoryInst *ret;
+      pthread_mutex_lock(&lock);
+      std::map<ID::IDType, RadosMemoryInst*>::const_iterator it =
+        instances.find(ID(inst).id());
+      assert(it != instances.end());
+      ret = it->second;
+      pthread_mutex_unlock(&lock);
+      return ret;
+    }
+
     void RadosMemory::destroy_instance(RegionInstance i,
         bool local_destroy)
     {
@@ -161,13 +224,11 @@ namespace Realm {
 
     off_t RadosMemory::alloc_bytes(size_t size)
     {
-      assert(0);
       return 0;
     }
 
     void RadosMemory::free_bytes(off_t offset, size_t size)
     {
-      assert(0);
     }
 
     void RadosMemory::get_bytes(off_t offset, void *dst, size_t size)
