@@ -680,6 +680,12 @@ namespace Realm {
       } else
         diskmem = 0;
 
+#ifdef USE_RADOS
+      RadosMemory *rados_mem = new RadosMemory(ID(ID::ID_MEMORY, gasnet_mynode(),
+            n->memories.size(), 0).convert<Memory>());
+      n->memories.push_back(rados_mem);
+#endif
+
 #ifdef USE_HDF
       // create HDF memory
       HDFMemory *hdfmem;
@@ -828,6 +834,17 @@ namespace Realm {
 	  adata[apos++] = 0;
 	}
 
+#ifdef USE_RADOS
+	if (rados_mem) {
+	  num_memories++;
+	  adata[apos++] = NODE_ANNOUNCE_MEM;
+	  adata[apos++] = rados_mem->me.id;
+	  adata[apos++] = Memory::RADOS_MEM;
+	  adata[apos++] = rados_mem->size;
+	  adata[apos++] = 0;
+	}
+#endif
+
 #ifdef USE_HDF
 	if(hdfmem) {
 	  num_memories++;
@@ -873,6 +890,16 @@ namespace Realm {
 	    adata[apos++] = 5;  // "low" bandwidth
 	    adata[apos++] = 100;  // "high" latency
 	  }
+
+#ifdef USE_RADOS
+	  if (rados_mem) {
+	    adata[apos++] = NODE_ANNOUNCE_PMA;
+	    adata[apos++] = (*it)->me.id;
+	    adata[apos++] = rados_mem->me.id;
+	    adata[apos++] = 5; // "low" bandwidth
+	    adata[apos++] = 100; // "high" latency
+	  } 
+#endif
 
 #ifdef USE_HDF
 	  if(hdfmem) {

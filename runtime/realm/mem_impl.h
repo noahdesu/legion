@@ -56,7 +56,10 @@ namespace Realm {
 	MKIND_ZEROCOPY, // CPU memory, pinned for GPU access
 	MKIND_DISK,    // disk memory accessible by owner node
 #ifdef USE_HDF
-	MKIND_HDF      // HDF memory accessible by owner node
+	MKIND_HDF,      // HDF memory accessible by owner node
+#endif
+#ifdef USE_RADOS
+  MKIND_RADOS,
 #endif
       };
 
@@ -274,6 +277,40 @@ namespace Realm {
       int fd; // file descriptor
       std::string file;  // file name
     };
+
+#ifdef USE_RADOS
+    class RadosMemory : public MemoryImpl {
+     public:
+      explicit RadosMemory(Memory m);
+      virtual ~RadosMemory();
+
+      virtual RegionInstance create_instance(IndexSpace is,
+          const int *linearization_bits,
+          size_t bytes_needed,
+          size_t block_size,
+          size_t element_size,
+          const std::vector<size_t>& field_sizes,
+          ReductionOpID redopid,
+          off_t list_size,
+          const ProfilingRequestSet &reqs,
+          RegionInstance parent_inst);
+
+      virtual void destroy_instance(RegionInstance i,
+          bool local_destroy);
+
+      virtual off_t alloc_bytes(size_t size);
+
+      virtual void free_bytes(off_t offset, size_t size);
+
+      virtual void get_bytes(off_t offset, void *dst, size_t size);
+
+      virtual void put_bytes(off_t offset, const void *src, size_t size);
+
+      virtual void *get_direct_ptr(off_t offset, size_t size);
+
+      virtual int get_home_node(off_t offset, size_t size);
+    };
+#endif
 
 #ifdef USE_HDF
     class HDFMemory : public MemoryImpl {

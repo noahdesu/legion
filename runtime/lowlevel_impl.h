@@ -80,6 +80,9 @@ namespace LegionRuntime {
     typedef Realm::ProcessorGroup ProcessorGroup;
     typedef Realm::Task Task;
     typedef Realm::MemoryImpl MemoryImpl;
+#ifdef USE_RADOS
+    typedef Realm::RadosMemory RadosMemory;
+#endif
 #ifdef USE_HDF
     typedef Realm::HDFMemory HDFMemory;
 #endif

@@ -130,6 +130,69 @@ namespace Realm {
       return gasnet_mynode();
     }
 
+#ifdef USE_RADOS
+    RadosMemory::RadosMemory(Memory m)
+      : MemoryImpl(m, 0, MKIND_RADOS, 256, Memory::RADOS_MEM)
+    {}
+
+    RadosMemory::~RadosMemory()
+    {}
+
+    RegionInstance RadosMemory::create_instance(IndexSpace is,
+        const int *linearization_bits,
+        size_t bytes_needed,
+        size_t block_size,
+        size_t element_size,
+        const std::vector<size_t>& field_sizes,
+        ReductionOpID redopid,
+        off_t list_size,
+        const ProfilingRequestSet &reqs,
+        RegionInstance parent_inst)
+    {
+      assert(0);
+      return RegionInstance::NO_INST;
+    }
+
+    void RadosMemory::destroy_instance(RegionInstance i,
+        bool local_destroy)
+    {
+      assert(0);
+    }
+
+    off_t RadosMemory::alloc_bytes(size_t size)
+    {
+      assert(0);
+      return 0;
+    }
+
+    void RadosMemory::free_bytes(off_t offset, size_t size)
+    {
+      assert(0);
+    }
+
+    void RadosMemory::get_bytes(off_t offset, void *dst, size_t size)
+    {
+      assert(0);
+    }
+
+    void RadosMemory::put_bytes(off_t offset, const void *src, size_t size)
+    {
+      assert(0);
+    }
+
+    void *RadosMemory::get_direct_ptr(off_t offset, size_t size)
+    {
+      assert(0);
+      return NULL;
+    }
+
+    int RadosMemory::get_home_node(off_t offset, size_t size)
+    {
+      assert(0);
+      return 0;
+    }
+#endif
+
 #ifdef USE_HDF
     HDFMemory::HDFMemory(Memory _me)
       : MemoryImpl(_me, 0 /*HDF doesn't have memory space*/, MKIND_HDF, ALIGNMENT, Memory::HDF_MEM)
