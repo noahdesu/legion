@@ -224,6 +224,12 @@ ifeq ($(strip $(USE_HDF)), 1)
   LD_FLAGS      += -lhdf5
 endif
 
+USE_RADOS ?= 0
+ifeq ($(strip $(USE_RADOS)),1)
+  CC_FLAGS      += -DUSE_RADOS
+  LD_FLAGS      += -lrados
+endif
+
 SKIP_MACHINES= titan% daint%
 #Extra options for MPI support in GASNet
 ifeq ($(strip $(USE_MPI)),1)
