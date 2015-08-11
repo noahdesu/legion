@@ -333,6 +333,7 @@ namespace Realm {
         bool read_only;
         RadosMemory *memory;
         std::string file;
+        std::vector<std::string> objnames;
       };
 
       RadosMemoryInst *get_specific_instance(RegionInstance inst);
