@@ -194,6 +194,12 @@ namespace Realm {
       rinst->memory = this;
       rinst->file = std::string(file);
 
+      for (unsigned idx = 0; idx < path_names.size(); idx++) {
+        std::stringstream ss;
+        ss << rinst->file << "." << path_names[idx];
+        rinst->objnames.push_back(ss.str());
+      }
+
       pthread_mutex_lock(&lock);
 
       assert(instances.find(ID(inst).id()) == instances.end());
@@ -206,20 +212,26 @@ namespace Realm {
 
     RadosMemory::RadosMemoryInst *RadosMemory::get_specific_instance(RegionInstance inst)
     {
-      RadosMemoryInst *ret;
       pthread_mutex_lock(&lock);
       std::map<ID::IDType, RadosMemoryInst*>::const_iterator it =
         instances.find(ID(inst).id());
       assert(it != instances.end());
-      ret = it->second;
+      RadosMemoryInst *ret = it->second;
       pthread_mutex_unlock(&lock);
       return ret;
     }
 
-    void RadosMemory::destroy_instance(RegionInstance i,
+    void RadosMemory::destroy_instance(RegionInstance inst,
         bool local_destroy)
     {
-      assert(0);
+      pthread_mutex_lock(&lock);
+      std::map<ID::IDType, RadosMemoryInst*>::const_iterator it =
+        instances.find(ID(inst).id());
+      assert(it != instances.end());
+      RadosMemoryInst *ret = it->second;
+      pthread_mutex_unlock(&lock);
+      delete ret;
+      destroy_instance_local(inst, local_destroy);
     }
 
     off_t RadosMemory::alloc_bytes(size_t size)
