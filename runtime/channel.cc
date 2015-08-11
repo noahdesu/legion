@@ -762,6 +762,289 @@ namespace LegionRuntime {
       }
 #endif
 
+#ifdef USE_RADOS
+      template<unsigned DIM>
+      RadosXferDes<DIM>::RadosXferDes(Channel* _channel, bool has_pre_XferDes,
+                                  Buffer* _src_buf, Buffer* _dst_buf,
+                                  char* _mem_base, RadosMemory::RadosMemoryInst *_rados_inst,
+                                  Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
+                                  long max_nr, XferOrder::Type _order, XferKind _kind)
+      {
+        kind = _kind;
+        channel = _channel;
+        order = _order;
+        bytes_read = bytes_write = 0;
+        pre_XferDes = NULL;
+        next_XferDes = NULL;
+        next_bytes_read = 0;
+        src_buf = _src_buf;
+        dst_buf = _dst_buf;
+        // for now, we didn't consider HDF transfer for intermediate buffer
+        // since ib may involve a different address space model
+        assert(!src_buf->is_ib);
+        assert(!dst_buf->is_ib);
+        assert(!has_pre_XferDes);
+        mem_base = _mem_base;
+        rados_inst = _rados_inst;
+        domain = _domain;
+        size_t total_field_size = 0;
+        for (int i = 0; i < _oas_vec.size(); i++) {
+          OffsetsAndSize oas;
+          oas.src_offset = _oas_vec[i].src_offset;
+          oas.dst_offset = _oas_vec[i].dst_offset;
+          oas.size = _oas_vec[i].size;
+          total_field_size += oas.size;
+          oas_vec.push_back(oas);
+        }
+        bytes_total = total_field_size * domain.get_volume();
+        pre_bytes_write = (!has_pre_XferDes) ? bytes_total : 0;
+        complete_event = GenEventImpl::create_genevent()->current_event();
+
+        Rect<DIM> subrect_check;
+        switch (kind) {
+          case XferDes::XFER_RADOS_READ:
+          {
+            /*
+             *
+             */
+            RadosReadRequest *rados_read_reqs = (RadosReadRequest*)calloc(max_nr, sizeof(RadosReadRequest));
+            for (int i = 0; i < max_nr; i++) {
+              rados_read_reqs[i].xd = this;
+              rados_read_reqs[i].memory = rados_inst->memory;
+              available_reqs.push(&rados_read_reqs[i]);
+            }
+            requests = rados_read_reqs;
+
+            /*
+             *
+             */
+            lsi = new GenericLinearSubrectIterator<Mapping<DIM, 1> >(
+                domain.get_rect<DIM>(), *(dst_buf->linearization.get_mapping<DIM>()));
+            // Make sure instance involves FortranArrayLinearization
+            assert(lsi->strides[0][0] == 1);
+
+            /*
+             *
+             */
+            for (fit = oas_vec.begin(); fit != oas_vec.end(); fit++) {
+              off_t offset = 0;
+              int idx = 0;
+              while (offset < (*fit).src_offset) {
+                offset += 8; // FIXME
+                idx++;
+              }
+              assert(offset == (*fit).src_offset);
+              (*fit).src_offset = idx;
+            }
+
+            fit = oas_vec.begin();
+            pir = new GenericPointInRectIterator<DIM>(domain.get_rect<DIM>());
+
+            break;
+          }
+
+          case XferDes::XFER_RADOS_WRITE:
+          {
+            /*
+             *
+             */
+            RadosWriteRequest *rados_write_reqs = (RadosWriteRequest*)calloc(max_nr, sizeof(RadosWriteRequest));
+            for (int i = 0; i < max_nr; i++) {
+              rados_write_reqs[i].xd = this;
+              rados_write_reqs[i].memory = rados_inst->memory;
+              available_reqs.push(&rados_write_reqs[i]);
+            }
+            requests = rados_write_reqs;
+
+            /*
+             *
+             */
+            lsi = new GenericLinearSubrectIterator<Mapping<DIM, 1> >(
+                domain.get_rect<DIM>(), *(src_buf->linearization.get_mapping<DIM>()));
+            // Make sure instance involves FortranArrayLinearization
+            assert(lsi->strides[0][0] == 1);
+
+            /*
+             *
+             */
+            for (fit = oas_vec.begin(); fit != oas_vec.end(); fit++) {
+              off_t offset = 0;
+              int idx = 0;
+              while (offset < (*fit).dst_offset) {
+                offset += 8; // FIXME
+                idx++;
+              }
+              assert(offset == (*fit).dst_offset);
+
+              (*fit).dst_offset = idx;
+            }
+
+            fit = oas_vec.begin();
+            pir = new GenericPointInRectIterator<DIM>(domain.get_rect<DIM>());
+
+            break;
+          }
+          default:
+            assert(0);
+        }
+      }
+
+      template<unsigned DIM>
+      long RadosXferDes<DIM>::get_requests(Request **requests, long nr)
+      {
+        long ns = 0;
+        while (ns < nr && !available_reqs.empty() && fit != oas_vec.end()) {
+          requests[ns] = available_reqs.front();
+          available_reqs.pop();
+          requests[ns]->is_read_done = false;
+          requests[ns]->is_write_done = false;
+          int todo;
+
+          switch (kind) {
+            case XferDes::XFER_RADOS_READ:
+            {
+              size_t elemnt_size = 8; // FIXME
+              todo = min(pir->r.hi[0] - pir->p[0] + 1,
+                  dst_buf->block_size - lsi->mapping.image(pir->p) % dst_buf->block_size);
+              std::cout << "GetRequest:RadosRead: todo=" << todo << std::endl;
+              RadosReadRequest *rados_read_req = (RadosReadRequest*)requests[ns];
+#if 0
+              off_t hdf_idx = fit->src_offset;
+              pthread_rwlock_rdlock(&hdf_metadata->hdf_memory->rwlock);
+              HDFReadRequest* hdf_read_req = (HDFReadRequest*) requests[ns];
+              hdf_read_req->dataset_id = hdf_metadata->dataset_ids[hdf_idx];
+              hdf_read_req->rwlock = &hdf_metadata->dataset_rwlocks[hdf_idx];
+              hdf_read_req->mem_type_id = hdf_metadata->datatype_ids[hdf_idx];
+              hsize_t count[DIM], offset[DIM];
+              for (int i = 0; i < DIM; i++) {
+                count[i] = 1;
+                offset[i] = pir->p[i] - hdf_metadata->lo[i];
+              }
+              count[0] = todo;
+              hdf_read_req->file_space_id = H5Dget_space(hdf_metadata->dataset_ids[hdf_idx]);
+              // HDF dimension always start with zero, but Legion::Domain may start with any integer
+              // We need to deal with the offset between them here
+              herr_t ret = H5Sselect_hyperslab(hdf_read_req->file_space_id,
+                  H5S_SELECT_SET, offset, NULL, count, NULL);
+              assert(ret >= 0);
+              pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
+              pthread_rwlock_wrlock(&hdf_metadata->hdf_memory->rwlock);
+              hdf_read_req->mem_space_id = H5Screate_simple(DIM, count, NULL);
+              pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
+              off_t dst_offset = calc_mem_loc(dst_buf->alloc_offset, fit->dst_offset, fit->size,
+                                              dst_buf->elmt_size, dst_buf->block_size, lsi->mapping.image(pir->p));
+              hdf_read_req->dst = mem_base + dst_offset;
+#endif
+              rados_read_req->nbytes = todo * elemnt_size;
+              break;
+            }
+            case XferDes::XFER_RADOS_WRITE:
+            {
+              size_t elemnt_size = 8; // FIXME
+              todo = min(pir->r.hi[0] - pir->p[0] + 1,
+                  src_buf->block_size - lsi->mapping.image(pir->p) % src_buf->block_size);
+              std::cout << "GetRequest:RadosWrite: todo=" << todo << std::endl;
+              RadosWriteRequest *rados_write_req = (RadosWriteRequest*)requests[ns];
+#if 0
+              off_t hdf_idx = fit->dst_offset;
+              pthread_rwlock_rdlock(&hdf_metadata->hdf_memory->rwlock);
+              HDFWriteRequest* hdf_write_req = (HDFWriteRequest*) requests[ns];
+              hdf_write_req->dataset_id = hdf_metadata->dataset_ids[hdf_idx];
+              hdf_write_req->rwlock = &hdf_metadata->dataset_rwlocks[hdf_idx];
+              hdf_write_req->mem_type_id = hdf_metadata->datatype_ids[hdf_idx];
+              hsize_t count[DIM], offset[DIM];
+              for (int i = 0; i < DIM; i++) {
+                count[i] = 1;
+                offset[i] = pir->p[i] - hdf_metadata->lo[i];
+              }
+              count[0] = todo;
+              hdf_write_req->file_space_id = H5Dget_space(hdf_metadata->dataset_ids[hdf_idx]);
+              // HDF dimension always start with zero, but Legion::Domain may start with any integer
+              // We need to deal with the offset between them here
+              herr_t ret = H5Sselect_hyperslab(hdf_write_req->file_space_id, H5S_SELECT_SET, offset, NULL, count, NULL);
+              assert(ret >= 0);
+              pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
+              pthread_rwlock_wrlock(&hdf_metadata->hdf_memory->rwlock);
+              hdf_write_req->mem_space_id = H5Screate_simple(DIM, count, NULL);
+              pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
+              off_t src_offset = calc_mem_loc(src_buf->alloc_offset, fit->src_offset, fit->size,
+                                              src_buf->elmt_size, src_buf->block_size, lsi->mapping.image(pir->p));
+              hdf_write_req->src = mem_base + src_offset;
+#endif
+              rados_write_req->nbytes = todo * elemnt_size;
+              break;
+            }
+            default:
+              assert(0);
+          }
+
+          while (todo > 0) {
+            pir->step();
+            todo--;
+          }
+
+          if (!pir->any_left) {
+            fit++;
+            delete pir;
+            pir = new GenericPointInRectIterator<DIM>(domain.get_rect<DIM>());
+          }
+
+          ns ++;
+        }
+        return ns;
+      }
+
+      template<unsigned DIM>
+      void RadosXferDes<DIM>::notify_request_read_done(Request *req)
+      {
+        req->is_read_done = true;
+        // close and release HDF resources
+        // currently we don't support ib case
+        assert(!pre_XferDes);
+        switch (kind) {
+          case XferDes::XFER_RADOS_READ:
+          {
+            RadosReadRequest *rados_read_req = (RadosReadRequest*)req;
+            bytes_read += rados_read_req->nbytes;
+            break;
+          }
+
+          case XferDes::XFER_RADOS_WRITE:
+          {
+            RadosWriteRequest *rados_write_req = (RadosWriteRequest*)req;
+            bytes_read += rados_write_req->nbytes;
+            break;
+          }
+          default:
+            assert(0);
+        }
+      }
+
+      template<unsigned DIM>
+      void RadosXferDes<DIM>::notify_request_write_done(Request *req)
+      {
+        req->is_write_done = true;
+        // currently we don't support ib case
+        assert(!next_XferDes);
+        switch (kind) {
+          case XferDes::XFER_RADOS_READ:
+          {
+            RadosReadRequest *rados_read_req = (RadosReadRequest*)req;
+            bytes_write += rados_read_req->nbytes;
+            break;
+          }
+          case XferDes::XFER_RADOS_WRITE:
+          {
+            RadosWriteRequest *rados_write_req = (RadosWriteRequest*)req;
+            bytes_write += rados_write_req->nbytes;
+            break;
+          }
+          default:
+            assert(0);
+        }
+      }
+#endif
+
 #ifdef USE_HDF
       template<unsigned DIM>
       HDFXferDes<DIM>::HDFXferDes(Channel* _channel, bool has_pre_XferDes,
@@ -1346,6 +1629,55 @@ namespace LegionRuntime {
       }
 #endif
 
+#ifdef USE_RADOS
+      RadosChannel::RadosChannel(long max_nr, XferDes::XferKind _kind)
+      {
+        kind = _kind;
+        capacity = max_nr;
+      }
+
+      RadosChannel::~RadosChannel() {}
+
+      long RadosChannel::submit(Request** requests, long nr)
+      {
+        switch (kind) {
+          case XferDes::XFER_RADOS_READ:
+          {
+            RadosReadRequest **rados_read_reqs = (RadosReadRequest**)requests;
+            for (int i = 0; i < nr; i++) {
+              RadosReadRequest *request = rados_read_reqs[i];
+              std::cout << "RadosRead" << std::endl;
+              request->xd->notify_request_read_done(request);
+              request->xd->notify_request_write_done(request);
+            }
+            break;
+          }
+
+          case XferDes::XFER_RADOS_WRITE:
+          {
+            RadosWriteRequest **rados_read_reqs = (RadosWriteRequest**)requests;
+            for (int i = 0; i < nr; i++) {
+              RadosWriteRequest *request = rados_read_reqs[i];
+              std::cout << "RadosWrite" << std::endl;
+              request->xd->notify_request_read_done(request);
+              request->xd->notify_request_write_done(request);
+            }
+            break;
+          }
+          default:
+            assert(false);
+        }
+        return nr;
+      }
+
+      void RadosChannel::pull() {}
+
+      long RadosChannel::available()
+      {
+        return capacity;
+      }
+#endif
+
 #ifdef USE_HDF
       HDFChannel::HDFChannel(long max_nr, XferDes::XferKind _kind)
       {
@@ -1536,6 +1868,11 @@ namespace LegionRuntime {
       template class HDFXferDes<1>;
       template class HDFXferDes<2>;
       template class HDFXferDes<3>;
+#endif
+#ifdef USE_RADOS
+      template class RadosXferDes<1>;
+      template class RadosXferDes<2>;
+      template class RadosXferDes<3>;
 #endif
   } // namespace LowLevel
 } // namespace LegionRuntime

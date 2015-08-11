@@ -2764,6 +2764,18 @@ namespace LegionRuntime {
             break;
           }
 #endif
+#ifdef USE_RADOS
+          case MemoryImpl::MKIND_RADOS:
+          {
+            RadosMemory *rados_mem = (RadosMemory*)get_runtime()->get_memory_impl(dst_mem);
+            RadosMemory::RadosMemoryInst *rinst = rados_mem->get_specific_instance(dst_inst);
+            XferDes *xd = new RadosXferDes<DIM>(channel_manager->get_rados_write_channel(),
+                false, src_buf, dst_buf, src_mem_base, rinst, domain, oasvec, 100/*max_nr*/,
+                XferOrder::DST_FIFO, XferDes::XFER_RADOS_WRITE);
+            path.push_back(xd);
+            break;
+          }
+#endif
           case MemoryImpl::MKIND_GLOBAL:
             fprintf(stderr, "[DMA] To be implemented: cpu memory -> gasnet memory\n");
             assert(0);
@@ -2799,6 +2811,9 @@ namespace LegionRuntime {
 #ifdef USE_DISK
           case MemoryImpl::MKIND_DISK:
 #endif /*USE_DISK*/
+#ifdef USE_RADOS
+          case MemoryImpl::MKIND_RADOS:
+#endif
 #ifdef USE_HDF
           case MemoryImpl::MKIND_HDF:
 #endif
@@ -2921,6 +2936,12 @@ namespace LegionRuntime {
             path.push_back(xd2);
             break;
           }
+#ifdef USE_RADOS
+          case MemoryImpl::MKIND_RADOS:
+            fprintf(stderr, "[DMA] To be implemented:disk memory -> rados memory\n");
+            assert(0);
+            break;
+#endif
 #ifdef USE_HDF
           case MemoryImpl::MKIND_HDF:
             fprintf(stderr, "[DMA] To be implemented:disk memory -> hdf memory\n");
@@ -2943,6 +2964,57 @@ namespace LegionRuntime {
           break;
         }
 #endif /*USE_DISK*/
+#ifdef USE_RADOS
+        case MemoryImpl::MKIND_RADOS:
+        {
+          RadosMemory *rados_mem = (RadosMemory*)get_runtime()->get_memory_impl(src_mem);
+          RadosMemory::RadosMemoryInst *rinst = rados_mem->get_specific_instance(src_inst);
+
+          switch (dst_kind) {
+            case MemoryImpl::MKIND_SYSMEM:
+            case MemoryImpl::MKIND_ZEROCOPY:
+              {
+                printf("rados->cpu XferDes\n");
+                char *dst_mem_base = (char*)get_runtime()->get_memory_impl(dst_mem)->get_direct_ptr(0, 0);
+                XferDes* xd = new RadosXferDes<DIM>(channel_manager->get_rados_read_channel(), false,
+                    src_buf, dst_buf, dst_mem_base, rinst, domain, oasvec,
+                    100/*max_nr*/, Layouts::XferOrder::SRC_FIFO, XferDes::XFER_RADOS_READ);
+                path.push_back(xd);
+                break;
+              }
+#ifdef USE_CUDA
+            case MemoryImpl::MKIND_GPUFB:
+              fprintf(stderr, "To be implemented: rados memory -> gpu memory\n");
+              assert(0);
+              break;
+#endif
+            case MemoryImpl::MKIND_RADOS:
+              fprintf(stderr, "To be implemented: rados memory -> rados memory\n");
+              assert(0);
+              break;
+            case MemoryImpl::MKIND_DISK:
+            case MemoryImpl::MKIND_HDF:
+              fprintf(stderr, "To be implemented: rados memory -> hdf memory\n");
+              assert(0);
+              break;
+            case MemoryImpl::MKIND_GLOBAL:
+              fprintf(stderr, "To be implemented: rados memory -> global memory\n");
+              assert(0);
+              break;
+            case MemoryImpl::MKIND_RDMA:
+            case MemoryImpl::MKIND_REMOTE:
+              fprintf(stderr, "To be implemented: rados memory -> remote memory\n");
+              assert(0);
+              break;
+            default:
+              fprintf(stderr, "Unrecognized destination memory kind!\n");
+              assert(0);
+          }
+          break;
+
+        }
+#endif
+
 #ifdef USE_HDF
         case MemoryImpl::MKIND_HDF:
         {
@@ -4604,6 +4676,10 @@ namespace LegionRuntime {
       // Need a dedicated thread for handling HDF requests
       num_threads ++;
 #endif
+#ifdef USE_RADOS
+      // Need a dedicated thread for handling HDF requests
+      num_threads ++;
+#endif
       dma_threads = (DMAThread**) calloc(num_threads, sizeof(DMAThread*));
       MemcpyChannel* memcpy_channel = channel_manager->create_memcpy_channel(max_nr);
       dma_threads[0] = new DMAThread(max_nr, xferDes_queue, memcpy_channel);
@@ -4627,6 +4703,12 @@ namespace LegionRuntime {
       hdf_channels.push_back(channel_manager->create_hdf_read_channel(max_nr));
       hdf_channels.push_back(channel_manager->create_hdf_write_channel(max_nr));
       dma_threads[2] = new DMAThread(max_nr, xferDes_queue, hdf_channels);
+#endif
+#ifdef USE_RADOS
+      std::vector<Channel*> rados_channels;
+      rados_channels.push_back(channel_manager->create_rados_read_channel(max_nr));
+      rados_channels.push_back(channel_manager->create_rados_write_channel(max_nr));
+      dma_threads[3] = new DMAThread(max_nr, xferDes_queue, rados_channels);
 #endif
       worker_threads = new pthread_t[num_threads];
       for (int i = 0; i < num_threads; i++) {

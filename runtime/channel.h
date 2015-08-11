@@ -210,6 +210,22 @@ namespace LegionRuntime{
 
 #endif
 
+#ifdef USE_RADOS
+    class RadosReadRequest : public Request {
+    public:
+      char* dst;
+      size_t nbytes;
+      RadosMemory *memory;
+    };
+
+    class RadosWriteRequest : public Request {
+    public:
+      char* src;
+      size_t nbytes;
+      RadosMemory *memory;
+    };
+#endif
+
 #ifdef USE_HDF
     class HDFReadRequest : public Request {
     public:
@@ -248,7 +264,9 @@ namespace LegionRuntime{
         XFER_GASNET_READ,
         XFER_GASNET_WRITE,
         XFER_HDF_READ,
-        XFER_HDF_WRITE
+        XFER_HDF_WRITE,
+        XFER_RADOS_READ,
+        XFER_RADOS_WRITE,
       };
     protected:
       uint64_t /*bytes_submit, */bytes_read, bytes_write, bytes_total;
@@ -617,6 +635,42 @@ namespace LegionRuntime{
     };
 #endif
 
+#ifdef USE_RADOS
+    template<unsigned DIM>
+    class RadosXferDes : public XferDes {
+    public:
+      RadosXferDes(Channel* _channel, bool has_pre_XferDes,
+                 Buffer* src_buf, Buffer* _dst_buf,
+                 char* _mem_base, RadosMemory::RadosMemoryInst *rados_inst,
+                 Domain domain, const std::vector<OffsetsAndSize>& oas_vec,
+                 long max_nr, XferOrder::Type _order, XferKind _kind);
+      ~RadosXferDes()
+      {
+        //deallocate buffers
+        delete src_buf;
+        if(!next_XferDes)
+          delete dst_buf;
+        free(requests);
+        delete pir;
+        delete lsi;
+        // trigger complete event
+        get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
+      }
+
+      long get_requests(Request** requests, long nr);
+      void notify_request_read_done(Request* req);
+      void notify_request_write_done(Request* req);
+
+    private:
+      Request* requests;
+      char *mem_base;
+      RadosMemory::RadosMemoryInst *rados_inst;
+      std::vector<OffsetsAndSize>::iterator fit;
+      GenericPointInRectIterator<DIM>* pir;
+      GenericLinearSubrectIterator<Mapping<DIM, 1> >* lsi;
+    };
+#endif
+
 #ifdef USE_HDF
     template<unsigned DIM>
     class HDFXferDes : public XferDes {
@@ -758,6 +812,19 @@ namespace LegionRuntime{
     };
 #endif
 
+#ifdef USE_RADOS
+    class RadosChannel : public Channel {
+    public:
+      RadosChannel(long max_nr, XferDes::XferKind _kind);
+      ~RadosChannel();
+      long submit(Request **requests, long nr);
+      void pull();
+      long available();
+    private:
+      long capacity;
+    };
+#endif
+
     class ChannelManager {
     public:
       ChannelManager(void) {
@@ -770,6 +837,10 @@ namespace LegionRuntime{
 #ifdef USE_HDF
         hdf_read_channel = NULL;
         hdf_write_channel = NULL;
+#endif
+#ifdef USE_RADOS
+        rados_read_channel = NULL;
+        rados_write_channel = NULL;
 #endif
       }
       ~ChannelManager(void) {
@@ -858,6 +929,18 @@ namespace LegionRuntime{
         return hdf_write_channel;
       }
 #endif
+#ifdef USE_RADOS
+      RadosChannel *create_rados_read_channel(long max_nr) {
+        assert(rados_read_channel == NULL);
+        rados_read_channel = new RadosChannel(max_nr, XferDes::XFER_RADOS_READ);
+        return rados_read_channel;
+      }
+      RadosChannel *create_rados_write_channel(long max_nr) {
+        assert(rados_write_channel == NULL);
+        rados_write_channel = new RadosChannel(max_nr, XferDes::XFER_RADOS_WRITE);
+        return rados_write_channel;
+      }
+#endif
       MemcpyChannel* get_memcpy_channel() {
         return memcpy_channel;
       }
@@ -909,6 +992,14 @@ namespace LegionRuntime{
         return hdf_write_channel;
       }
 #endif
+#ifdef USE_RADOS
+      RadosChannel* get_rados_read_channel() {
+        return rados_read_channel;
+      }
+      RadosChannel* get_rados_write_channel() {
+        return rados_write_channel;
+      }
+#endif
     public:
       MemcpyChannel* memcpy_channel;
       GASNetChannel *gasnet_read_channel, *gasnet_write_channel;
@@ -920,6 +1011,9 @@ namespace LegionRuntime{
 #endif
 #ifdef USE_HDF
       HDFChannel *hdf_read_channel, *hdf_write_channel;
+#endif
+#ifdef USE_RADOS
+      RadosChannel *rados_read_channel, *rados_write_channel;
 #endif
     };
 
