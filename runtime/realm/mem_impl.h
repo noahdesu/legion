@@ -322,8 +322,12 @@ namespace Realm {
       virtual void free_bytes(off_t offset, size_t size);
 
       virtual void get_bytes(off_t offset, void *dst, size_t size);
+      void get_bytes(RegionInstance inst, const DomainPoint& dp,
+          int fid, void *dst, size_t size);
 
       virtual void put_bytes(off_t offset, const void *src, size_t size);
+      void put_bytes(RegionInstance inst, const DomainPoint& dp,
+          int fid, const void *src, size_t size);
 
       virtual void *get_direct_ptr(off_t offset, size_t size);
 
@@ -334,6 +338,8 @@ namespace Realm {
         RadosMemory *memory;
         std::string file;
         std::vector<std::string> objnames;
+        int ndims;
+        int lo[3];
       };
 
       RadosMemoryInst *get_specific_instance(RegionInstance inst);
