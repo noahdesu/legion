@@ -1276,6 +1276,10 @@ namespace LegionRuntime {
       // HDF memory doesn't support 
       assert(impl->memory.kind() != Memory::HDF_MEM);
 #endif
+#ifdef USE_RADOS
+      // Rados memory doesn't support 
+      assert(impl->memory.kind() != Memory::RADOS_MEM);
+#endif
       Arrays::Mapping<1, 1> *mapping = impl->metadata.linearization.get_mapping<1>();
       int index = mapping->image(ptr.value);
       impl->get_bytes(index, field_offset + offset, dst, bytes);
@@ -1297,7 +1301,18 @@ namespace LegionRuntime {
 #endif
 #ifdef USE_RADOS
       if (impl->memory.kind() == Memory::RADOS_MEM) {
-        assert(0);
+        int fid = 0;
+        off_t byte_offset = field_offset + offset;
+        for (std::vector<size_t>::const_iterator it = impl->metadata.field_sizes.begin();
+             it != impl->metadata.field_sizes.end(); it++) {
+          if (byte_offset < (off_t)(*it)) {
+            break;
+          }
+          fid++;
+        }
+        RadosMemory *mem = (RadosMemory*)get_runtime()->get_memory_impl(impl->memory);
+        mem->get_bytes(impl->me, dp, fid, dst, bytes);
+        return;
       }
 #endif
 #ifdef USE_HDF
@@ -1348,6 +1363,10 @@ namespace LegionRuntime {
      // HDF memory doesn't support enumerate type
      assert(impl->memory.kind() != Memory::HDF_MEM);
 #endif
+#ifdef USE_RADOS
+     // Rados memory doesn't support enumerate type
+     assert(impl->memory.kind() != Memory::RADOS_MEM);
+#endif
 
       Arrays::Mapping<1, 1> *mapping = impl->metadata.linearization.get_mapping<1>();
       int index = mapping->image(ptr.value);
@@ -1369,7 +1388,18 @@ namespace LegionRuntime {
 #endif
 #ifdef USE_RADOS
       if (impl->memory.kind() == Memory::RADOS_MEM) {
-        assert(0);
+        int fid = 0;
+        off_t byte_offset = field_offset + offset;
+        for (std::vector<size_t>::const_iterator it = impl->metadata.field_sizes.begin();
+             it != impl->metadata.field_sizes.end(); it++) {
+          if (byte_offset < (off_t)(*it)) {
+            break;
+          }
+          fid++;
+        }
+        RadosMemory *mem = (RadosMemory*)get_runtime()->get_memory_impl(impl->memory);
+        mem->put_bytes(impl->me, dp, fid, src, bytes);
+        return;
       }
 #endif
 #ifdef USE_HDF
