@@ -137,6 +137,8 @@ namespace Realm {
     RadosMemory::RadosMemory(Memory m, const std::string pool)
       : MemoryImpl(m, 0, MKIND_RADOS, 256, Memory::RADOS_MEM)
     {
+      std::cout << "Connecting to RADOS..." << std::endl;
+      std::flush(std::cout);
       cluster.init(NULL);
       // FIXME: how to inject env vars through gasnet?
       cluster.conf_read_file("/home/nwatkins/ceph/src/ceph.conf");
@@ -194,6 +196,11 @@ namespace Realm {
       rinst->memory = this;
       rinst->file = std::string(file);
 
+      rinst->ndims = domain.get_dim();
+      for (int i = 0; i < rinst->ndims; i++) {
+        rinst->lo[i] = domain.rect_data[i];
+      }
+
       for (unsigned idx = 0; idx < path_names.size(); idx++) {
         std::stringstream ss;
         ss << rinst->file << "." << path_names[idx];
@@ -248,9 +255,59 @@ namespace Realm {
       assert(0);
     }
 
+    void RadosMemory::get_bytes(RegionInstance inst, const DomainPoint& dp,
+        int fid, void *dst, size_t size)
+    {
+      RadosMemoryInst *rinst = get_specific_instance(inst);
+
+      int offset[3];
+      for (int i = 0; i < rinst->ndims; i++) {
+        offset[i] = dp.point_data[i] - rinst->lo[i];
+      }
+
+      // FIXME
+      assert(size == sizeof(int));
+      assert(rinst->ndims == 1);
+      uint64_t objoffset = offset[0];
+
+      std::string objname = rinst->objnames[fid];
+
+      ceph::bufferlist bl;
+      ceph::bufferptr bp = ceph::buffer::create_static(size, (char*)dst);
+      bl.push_back(bp);
+
+      int ret = ioctx.read(objname, bl, size, objoffset * size);
+      assert(ret == (int)size);
+      assert(bl.length() == size);
+      if (bl.c_str() != dst)
+        bl.copy(0, size, (char*)dst);
+    }
+
     void RadosMemory::put_bytes(off_t offset, const void *src, size_t size)
     {
       assert(0);
+    }
+
+    void RadosMemory::put_bytes(RegionInstance inst, const DomainPoint& dp,
+        int fid, const void *src, size_t size)
+    {
+      RadosMemoryInst *rinst = get_specific_instance(inst);
+
+      int offset[3];
+      for (int i = 0; i < rinst->ndims; i++) {
+        offset[i] = dp.point_data[i] - rinst->lo[i];
+      }
+
+      // FIXME
+      assert(size == sizeof(int));
+      assert(rinst->ndims == 1);
+      uint64_t objoffset = offset[0];
+
+      std::string objname = rinst->objnames[fid];
+      ceph::bufferlist bl;
+      bl.append((const char*)src, size);
+      int ret = ioctx.write(objname, bl, size, objoffset * size);
+      assert(ret == 0);
     }
 
     void *RadosMemory::get_direct_ptr(off_t offset, size_t size)
