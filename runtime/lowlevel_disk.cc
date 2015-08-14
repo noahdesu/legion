@@ -310,6 +310,43 @@ namespace Realm {
       assert(ret == 0);
     }
 
+    void RadosMemory::read_array(const char *objname, int *offset, int *count,
+        size_t nbytes, void *dst)
+    {
+      std::stringstream ss;
+      ss << offset[0] << "." << offset[1];
+
+      std::set<std::string> keys;
+      keys.insert(ss.str());
+
+      std::map<std::string, ceph::bufferlist> vals;
+      int ret = ioctx.omap_get_vals_by_keys(objname, keys, &vals);
+      assert(ret == 0);
+
+      std::map<std::string, ceph::bufferlist>::const_iterator it = vals.find(ss.str());
+      assert(it != vals.end());
+
+      ceph::bufferlist bl = it->second;
+
+      bl.copy(0, nbytes, (char*)dst);
+    }
+
+    void RadosMemory::write_array(const char *objname, int *offset, int *count,
+        size_t nbytes, void *src)
+    {
+      std::map<std::string, ceph::bufferlist> kv;
+
+      std::stringstream ss;
+      ss << offset[0] << "." << offset[1];
+
+      ceph::bufferlist bl;
+      bl.append((const char*)src, nbytes);
+      kv[ss.str()] = bl;
+
+      int ret = ioctx.omap_set(objname, kv);
+      assert(ret == 0);
+    }
+
     void *RadosMemory::get_direct_ptr(off_t offset, size_t size)
     {
       assert(0);

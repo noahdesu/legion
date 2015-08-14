@@ -1043,6 +1043,15 @@ namespace LegionRuntime {
         mem_base = _mem_base;
         rados_inst = _rados_inst;
         domain = _domain;
+        {
+          std::stringstream ss;
+          ss << "RadosXferDes: Domain: ";
+          Rect<2> rect = domain.get_rect<2>();
+          ss << domain.get_volume() << " "
+            << "(" << rect.lo.x[0] << ", " << rect.lo.x[1] << ") "
+            << "(" << rect.hi.x[0] << ", " << rect.hi.x[1] << ")";
+          std::cout << ss.str() << std::endl;;
+        }
         size_t total_field_size = 0;
         for (int i = 0; i < _oas_vec.size(); i++) {
           OffsetsAndSize oas;
@@ -1067,6 +1076,7 @@ namespace LegionRuntime {
             for (int i = 0; i < max_nr; i++) {
               rados_read_reqs[i].xd = this;
               rados_read_reqs[i].memory = rados_inst->memory;
+              strcpy(rados_read_reqs[i].objname, "<not-set>");
               available_reqs.push(&rados_read_reqs[i]);
             }
             requests = rados_read_reqs;
@@ -1108,6 +1118,7 @@ namespace LegionRuntime {
             for (int i = 0; i < max_nr; i++) {
               rados_write_reqs[i].xd = this;
               rados_write_reqs[i].memory = rados_inst->memory;
+              strcpy(rados_write_reqs[i].objname, "<not-set>");
               available_reqs.push(&rados_write_reqs[i]);
             }
             requests = rados_write_reqs;
@@ -1162,72 +1173,78 @@ namespace LegionRuntime {
               size_t elemnt_size = 8; // FIXME
               todo = min(pir->r.hi[0] - pir->p[0] + 1,
                   dst_buf->block_size - lsi->mapping.image(pir->p) % dst_buf->block_size);
-              std::cout << "GetRequest:RadosRead: todo=" << todo << std::endl;
               RadosReadRequest *rados_read_req = (RadosReadRequest*)requests[ns];
-#if 0
-              off_t hdf_idx = fit->src_offset;
-              pthread_rwlock_rdlock(&hdf_metadata->hdf_memory->rwlock);
-              HDFReadRequest* hdf_read_req = (HDFReadRequest*) requests[ns];
-              hdf_read_req->dataset_id = hdf_metadata->dataset_ids[hdf_idx];
-              hdf_read_req->rwlock = &hdf_metadata->dataset_rwlocks[hdf_idx];
-              hdf_read_req->mem_type_id = hdf_metadata->datatype_ids[hdf_idx];
-              hsize_t count[DIM], offset[DIM];
+
               for (int i = 0; i < DIM; i++) {
-                count[i] = 1;
-                offset[i] = pir->p[i] - hdf_metadata->lo[i];
+                rados_read_req->count[i] = 1;
+                rados_read_req->offset[i] = pir->p[i] - rados_inst->lo[i];
               }
-              count[0] = todo;
-              hdf_read_req->file_space_id = H5Dget_space(hdf_metadata->dataset_ids[hdf_idx]);
-              // HDF dimension always start with zero, but Legion::Domain may start with any integer
-              // We need to deal with the offset between them here
-              herr_t ret = H5Sselect_hyperslab(hdf_read_req->file_space_id,
-                  H5S_SELECT_SET, offset, NULL, count, NULL);
-              assert(ret >= 0);
-              pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
-              pthread_rwlock_wrlock(&hdf_metadata->hdf_memory->rwlock);
-              hdf_read_req->mem_space_id = H5Screate_simple(DIM, count, NULL);
-              pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
+              rados_read_req->count[0] = todo;
+
               off_t dst_offset = calc_mem_loc(dst_buf->alloc_offset, fit->dst_offset, fit->size,
-                                              dst_buf->elmt_size, dst_buf->block_size, lsi->mapping.image(pir->p));
-              hdf_read_req->dst = mem_base + dst_offset;
-#endif
+                  dst_buf->elmt_size, dst_buf->block_size, lsi->mapping.image(pir->p));
+              rados_read_req->dst = mem_base + dst_offset;
               rados_read_req->nbytes = todo * elemnt_size;
+              strcpy(rados_read_req->objname, rados_inst->objnames[fit->src_offset].c_str());
+
               break;
             }
+
             case XferDes::XFER_RADOS_WRITE:
             {
               size_t elemnt_size = 8; // FIXME
               todo = min(pir->r.hi[0] - pir->p[0] + 1,
                   src_buf->block_size - lsi->mapping.image(pir->p) % src_buf->block_size);
-              std::cout << "GetRequest:RadosWrite: todo=" << todo << std::endl;
               RadosWriteRequest *rados_write_req = (RadosWriteRequest*)requests[ns];
+
 #if 0
-              off_t hdf_idx = fit->dst_offset;
-              pthread_rwlock_rdlock(&hdf_metadata->hdf_memory->rwlock);
-              HDFWriteRequest* hdf_write_req = (HDFWriteRequest*) requests[ns];
-              hdf_write_req->dataset_id = hdf_metadata->dataset_ids[hdf_idx];
-              hdf_write_req->rwlock = &hdf_metadata->dataset_rwlocks[hdf_idx];
-              hdf_write_req->mem_type_id = hdf_metadata->datatype_ids[hdf_idx];
-              hsize_t count[DIM], offset[DIM];
-              for (int i = 0; i < DIM; i++) {
-                count[i] = 1;
-                offset[i] = pir->p[i] - hdf_metadata->lo[i];
+              {
+                std::stringstream ss;
+                ss << "GetRequest::RadosWrite:";
+
+                ss << "pir(";
+                for (int i = 0; i < DIM; i++) {
+                  ss << pir->p[i] << ",";
+                }
+                ss << ") ";
+
+                ss << "lo(";
+                for (int i = 0; i < DIM; i++) {
+                  ss << rados_inst->lo[i] << ",";
+                }
+                ss << ") ";
+
+                ss << "offset(";
+                for (int i = 0; i < DIM; i++) {
+                  ss << pir->p[i] - rados_inst->lo[i] << ",";
+                }
+                ss << ") ";
+
+                ss << "count(";
+                for (int i = 0; i < DIM; i++) {
+                  if (i == 0)
+                    ss << todo << ",";
+                  else
+                    ss << 1 << ",";
+                }
+                ss << ") ";
+
+                std::cout << ss.str() << std::endl;
               }
-              count[0] = todo;
-              hdf_write_req->file_space_id = H5Dget_space(hdf_metadata->dataset_ids[hdf_idx]);
-              // HDF dimension always start with zero, but Legion::Domain may start with any integer
-              // We need to deal with the offset between them here
-              herr_t ret = H5Sselect_hyperslab(hdf_write_req->file_space_id, H5S_SELECT_SET, offset, NULL, count, NULL);
-              assert(ret >= 0);
-              pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
-              pthread_rwlock_wrlock(&hdf_metadata->hdf_memory->rwlock);
-              hdf_write_req->mem_space_id = H5Screate_simple(DIM, count, NULL);
-              pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
-              off_t src_offset = calc_mem_loc(src_buf->alloc_offset, fit->src_offset, fit->size,
-                                              src_buf->elmt_size, src_buf->block_size, lsi->mapping.image(pir->p));
-              hdf_write_req->src = mem_base + src_offset;
 #endif
+
+              for (int i = 0; i < DIM; i++) {
+                rados_write_req->count[i] = 1;
+                rados_write_req->offset[i] = pir->p[i] - rados_inst->lo[i];
+              }
+              rados_write_req->count[0] = todo;
+
+              off_t src_offset = calc_mem_loc(src_buf->alloc_offset, fit->src_offset, fit->size,
+                  src_buf->elmt_size, src_buf->block_size, lsi->mapping.image(pir->p));
+              rados_write_req->src = mem_base + src_offset;
               rados_write_req->nbytes = todo * elemnt_size;
+              strcpy(rados_write_req->objname, rados_inst->objnames[fit->dst_offset].c_str());
+
               break;
             }
             default:
@@ -1953,7 +1970,16 @@ namespace LegionRuntime {
             RadosReadRequest **rados_read_reqs = (RadosReadRequest**)requests;
             for (int i = 0; i < nr; i++) {
               RadosReadRequest *request = rados_read_reqs[i];
-              std::cout << "RadosRead" << std::endl;
+              request->memory->read_array(request->objname,
+                  request->offset, request->count, request->nbytes,
+                  request->dst);
+#if 0
+              std::cout << "RadosRead: objname=" << request->objname <<
+                " offset=" << request->offset[0] << "," << request->offset[1] <<
+                " count=" << request->count[0] << "," << request->count[1] <<
+                " ptr=" << (void*)request->dst << "  size=" <<
+                request->nbytes << std::endl;
+#endif
               request->xd->notify_request_read_done(request);
               request->xd->notify_request_write_done(request);
             }
@@ -1965,15 +1991,27 @@ namespace LegionRuntime {
             RadosWriteRequest **rados_read_reqs = (RadosWriteRequest**)requests;
             for (int i = 0; i < nr; i++) {
               RadosWriteRequest *request = rados_read_reqs[i];
-              std::cout << "RadosWrite" << std::endl;
+              request->memory->write_array(request->objname,
+                  request->offset, request->count, request->nbytes,
+                  request->src);
               request->xd->notify_request_read_done(request);
               request->xd->notify_request_write_done(request);
+
+#if 0
+              std::cout << "RadosWrite: objname=" << request->objname <<
+                " offset=" << request->offset[0] << "," << request->offset[1] <<
+                " count=" << request->count[0] << "," << request->count[1] <<
+                " ptr=" << (void*)request->src << "  size=" <<
+                request->nbytes << std::endl;
+#endif
             }
             break;
           }
+
           default:
             assert(false);
         }
+
         return nr;
       }
 
