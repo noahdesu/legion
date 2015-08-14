@@ -224,6 +224,9 @@ namespace LegionRuntime{
       char* dst;
       size_t nbytes;
       RadosMemory *memory;
+      char objname[100];
+      int count[3];
+      int offset[3];
     };
 
     class RadosWriteRequest : public Request {
@@ -231,6 +234,9 @@ namespace LegionRuntime{
       char* src;
       size_t nbytes;
       RadosMemory *memory;
+      char objname[100];
+      int count[3];
+      int offset[3];
     };
 #endif
 
