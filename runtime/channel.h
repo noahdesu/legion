@@ -824,22 +824,25 @@ namespace LegionRuntime{
     template<unsigned DIM>
     class RadosXferDes : public XferDes {
     public:
-      RadosXferDes(Channel* _channel, bool has_pre_XferDes,
-                 Buffer* src_buf, Buffer* _dst_buf,
-                 char* _mem_base, RadosMemory::RadosMemoryInst *rados_inst,
-                 Domain domain, const std::vector<OffsetsAndSize>& oas_vec,
-                 long max_nr, XferOrder::Type _order, XferKind _kind);
+      RadosXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
+                 XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
+                 RegionInstance inst, const Buffer& _src_buf, const Buffer& _dst_buf,
+                 const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
+                 uint64_t _max_req_size, long max_nr, int _priority,
+                 XferOrder::Type _order, XferKind _kind, Event _after_copy);
       ~RadosXferDes()
       {
-        //deallocate buffers
-        delete src_buf;
-        if(!next_XferDes)
-          delete dst_buf;
+        // clear available_reqs
+        while (!available_reqs.empty()) {
+          available_reqs.pop();
+        }
         free(requests);
         delete pir;
         delete lsi;
         // trigger complete event
-        get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
+        if (complete_event.exists()) {
+          get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
+        }
       }
 
       long get_requests(Request** requests, long nr);
@@ -848,7 +851,7 @@ namespace LegionRuntime{
 
     private:
       Request* requests;
-      char *mem_base;
+      char *buf_base;
       RadosMemory::RadosMemoryInst *rados_inst;
       std::vector<OffsetsAndSize>::iterator fit;
       GenericPointInRectIterator<DIM>* pir;

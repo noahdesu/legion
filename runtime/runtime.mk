@@ -247,6 +247,7 @@ endif
 endif # ifeq SHARED_LOWLEVEL
 
 
+CC_FLAGS += -std=c++11
 ifeq ($(strip $(DEBUG)),1)
 CC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -ggdb #-ggdb -Wall
 else
@@ -258,7 +259,7 @@ endif
 CC_FLAGS	+= -DCOMPILE_TIME_MIN_LEVEL=$(OUTPUT_LEVEL)
 
 # demand warning-free compilation
-CC_FLAGS        += -Wall -Werror
+CC_FLAGS        += -Wall -Werror -Wno-sign-compare
 
 #CC_FLAGS += -DUSE_MASKED_COPIES
 
