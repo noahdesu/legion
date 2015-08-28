@@ -2712,6 +2712,8 @@ namespace LegionRuntime {
             return XferDes::XFER_DISK_WRITE;
           else if (dst_ll_kind == Memory::HDF_MEM)
             return XferDes::XFER_HDF_WRITE;
+          else if (dst_ll_kind == Memory::RADOS_MEM)
+            return XferDes::XFER_RADOS_WRITE;
           assert(0);
           break;
         case Memory::GPU_FB_MEM:
@@ -2730,6 +2732,11 @@ namespace LegionRuntime {
         case Memory::HDF_MEM:
           if (is_cpu_mem(dst_ll_kind))
             return XferDes::XFER_HDF_READ;
+          else
+            return XferDes::XFER_NONE;
+        case Memory::RADOS_MEM:
+          if (is_cpu_mem(dst_ll_kind))
+            return XferDes::XFER_RADOS_READ;
           else
             return XferDes::XFER_NONE;
         default:
@@ -2814,13 +2821,20 @@ namespace LegionRuntime {
             Event event;
             XferDes::XferKind kind = get_xfer_des(mem_path[idx - 1], mem_path[idx]);
             XferOrder::Type order = idx == 1 ? XferOrder::DST_FIFO : XferOrder::SRC_FIFO;
+
             RegionInstance hdf_inst;
-            if (kind == XferDes::XFER_HDF_READ)
-              hdf_inst = src_inst;
-            else if (kind == XferDes::XFER_HDF_WRITE)
-              hdf_inst = dst_inst;
-            else
-              hdf_inst = RegionInstance::NO_INST;
+            switch (kind) {
+              case XferDes::XFER_HDF_READ:
+              case XferDes::XFER_RADOS_READ:
+                hdf_inst = src_inst;
+                break;
+              case XferDes::XFER_HDF_WRITE:
+              case XferDes::XFER_RADOS_WRITE:
+                hdf_inst = dst_inst;
+                break;
+              default:
+                hdf_inst = RegionInstance::NO_INST;
+            }
 
             if (idx != mem_path.size() - 1) {
               cur_buf = simple_create_intermediate_buffer(ID(mem_path[idx]).node(), mem_path[idx].kind(), domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
@@ -2931,12 +2945,12 @@ namespace LegionRuntime {
 #ifdef USE_RADOS
           case MemoryImpl::MKIND_RADOS:
           {
-            RadosMemory *rados_mem = (RadosMemory*)get_runtime()->get_memory_impl(dst_mem);
-            RadosMemory::RadosMemoryInst *rinst = rados_mem->get_specific_instance(dst_inst);
-            XferDes *xd = new RadosXferDes<DIM>(channel_manager->get_rados_write_channel(),
-                false, src_buf, dst_buf, src_mem_base, rinst, domain, oasvec, 100/*max_nr*/,
-                XferOrder::DST_FIFO, XferDes::XFER_RADOS_WRITE);
-            path.push_back(xd);
+            log_dma.info("create mem->rados xferdes\n");
+            XferDesID guid = get_xdq_singleton()->get_guid(ID(src_mem).node());
+            path.push_back(guid);
+            create_xfer_des<DIM>(this, gasnet_mynode(), guid, XferDes::XFERDES_NO_GUID, XferDes::XFERDES_NO_GUID,
+                                 src_buf, dst_buf, domain, oasvec, 16 * 1024/*max_req_size*/,
+                                 100/*max_nr*/, priority, XferOrder::DST_FIFO, XferDes::XFER_RADOS_WRITE, after_copy, dst_inst);
             break;
           }
 #endif
@@ -3016,6 +3030,7 @@ namespace LegionRuntime {
                                    100/*max_nr*/, priority, XferOrder::DST_FIFO, XferDes::XFER_REMOTE_WRITE, Event::NO_EVENT);
               break;
             }
+            case Memory::RADOS_MEM;
             case Memory::HDF_MEM:
             default:
               assert(0);
@@ -3162,19 +3177,16 @@ namespace LegionRuntime {
 #ifdef USE_RADOS
         case MemoryImpl::MKIND_RADOS:
         {
-          RadosMemory *rados_mem = (RadosMemory*)get_runtime()->get_memory_impl(src_mem);
-          RadosMemory::RadosMemoryInst *rinst = rados_mem->get_specific_instance(src_inst);
-
           switch (dst_kind) {
             case MemoryImpl::MKIND_SYSMEM:
             case MemoryImpl::MKIND_ZEROCOPY:
               {
-                printf("rados->cpu XferDes\n");
-                char *dst_mem_base = (char*)get_runtime()->get_memory_impl(dst_mem)->get_direct_ptr(0, 0);
-                XferDes* xd = new RadosXferDes<DIM>(channel_manager->get_rados_read_channel(), false,
-                    src_buf, dst_buf, dst_mem_base, rinst, domain, oasvec,
-                    100/*max_nr*/, Layouts::XferOrder::SRC_FIFO, XferDes::XFER_RADOS_READ);
-                path.push_back(xd);
+                log_dma.info("create rados->cpu mem XD\n");
+                XferDesID guid = get_xdq_singleton()->get_guid(ID(src_mem).node());
+                path.push_back(guid);
+                create_xfer_des<DIM>(this, gasnet_mynode(), guid, XferDes::XFERDES_NO_GUID, XferDes::XFERDES_NO_GUID,
+                    src_buf, dst_buf, domain, oasvec, 16 * 1024/*max_req_size*/,
+                    100/*max_nr*/, priority, XferOrder::SRC_FIFO, XferDes::XFER_RADOS_READ, after_copy, src_inst);
                 break;
               }
 #ifdef USE_CUDA
@@ -3188,10 +3200,12 @@ namespace LegionRuntime {
               assert(0);
               break;
             case MemoryImpl::MKIND_DISK:
+#ifdef USE_HDF
             case MemoryImpl::MKIND_HDF:
               fprintf(stderr, "To be implemented: rados memory -> hdf memory\n");
               assert(0);
               break;
+#endif
             case MemoryImpl::MKIND_GLOBAL:
               fprintf(stderr, "To be implemented: rados memory -> global memory\n");
               assert(0);
@@ -3236,6 +3250,12 @@ namespace LegionRuntime {
             fprintf(stderr, "To be implemented: hdf memory -> hdf memory\n");
             assert(0);
             break;
+#ifdef USE_RADOS
+          case MemoryImpl::MKIND_RADOS:
+            fprintf(stderr, "To be implemented: hdf memory -> rados memory\n");
+            assert(0);
+            break;
+#endif
           case MemoryImpl::MKIND_GLOBAL:
             fprintf(stderr, "To be implemented: hdf memory -> global memory\n");
             assert(0);
