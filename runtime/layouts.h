@@ -272,7 +272,7 @@ namespace LegionRuntime {
       size_t cur_idx, rect_size;
     };
 
-#ifdef USE_HDF
+#if defined(USE_HDF) || defined(USE_RADOS)
    template<unsigned DIM>
    class HDFLayoutIterator {
    public:
