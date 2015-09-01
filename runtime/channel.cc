@@ -1924,7 +1924,9 @@ namespace LegionRuntime {
         capacity = max_nr;
       }
 
-      RadosChannel::~RadosChannel() {}
+      RadosChannel::~RadosChannel() {
+        assert(pending_ios.empty());
+      }
 
       long RadosChannel::submit(Request** requests, long nr)
       {
@@ -1934,7 +1936,12 @@ namespace LegionRuntime {
             RadosReadRequest **rados_read_reqs = (RadosReadRequest**)requests;
             for (int i = 0; i < nr; i++) {
               RadosReadRequest *request = rados_read_reqs[i];
-              request->memory->read_array(request->objname,
+              request->completion = NULL;
+              request->retval = -1;
+              request->vals.clear();
+              request->memory->read_array(&request->completion,
+                  &request->retval, &request->vals,
+                  request->objname,
                   request->offset, request->count, request->nbytes,
                   request->dst);
 #if 0
@@ -1944,8 +1951,7 @@ namespace LegionRuntime {
                 " ptr=" << (void*)request->dst << "  size=" <<
                 request->nbytes << std::endl;
 #endif
-              request->xd->notify_request_read_done(request);
-              request->xd->notify_request_write_done(request);
+              pending_ios.push_back(request);
             }
             break;
           }
@@ -1955,11 +1961,11 @@ namespace LegionRuntime {
             RadosWriteRequest **rados_read_reqs = (RadosWriteRequest**)requests;
             for (int i = 0; i < nr; i++) {
               RadosWriteRequest *request = rados_read_reqs[i];
-              request->memory->write_array(request->objname,
+              request->completion = NULL;
+              request->memory->write_array(&request->completion, request->objname,
                   request->offset, request->count, request->nbytes,
                   request->src);
-              request->xd->notify_request_read_done(request);
-              request->xd->notify_request_write_done(request);
+              pending_ios.push_back(request);
 
 #if 0
               std::cout << "RadosWrite: objname=" << request->objname <<
@@ -1979,11 +1985,62 @@ namespace LegionRuntime {
         return nr;
       }
 
-      void RadosChannel::pull() {}
+      void RadosChannel::pull() {
+        switch (kind) {
+          case XferDes::XFER_RADOS_READ:
+            {
+              while (!pending_ios.empty()) {
+                RadosReadRequest *request = (RadosReadRequest*)pending_ios.front();
+                librados::AioCompletion *c = request->completion;
+                if (c->is_safe()) {
+                  assert(request->retval == 0);
+                  assert(c->get_return_value() == 0);
+
+                  assert(request->vals.size() == 1);
+                  std::map<std::string, ceph::bufferlist>::const_iterator it =
+                    request->vals.begin();
+                  assert(it != request->vals.end());
+                  ceph::bufferlist bl = it->second;
+                  bl.copy(0, request->nbytes, (char*)request->dst);
+
+                  request->xd->notify_request_read_done(request);
+                  request->xd->notify_request_write_done(request);
+
+                  c->release();
+
+                  pending_ios.pop_front();
+
+                } else
+                  break;
+              }
+            }
+            break;
+
+          case XferDes::XFER_RADOS_WRITE:
+            {
+              while (!pending_ios.empty()) {
+                RadosWriteRequest *request = (RadosWriteRequest*)pending_ios.front();
+                librados::AioCompletion *c = request->completion;
+                if (c->is_safe()) {
+                  assert(c->get_return_value() == 0);
+                  request->xd->notify_request_read_done(request);
+                  request->xd->notify_request_write_done(request);
+                  c->release();
+                  pending_ios.pop_front();
+                } else
+                  break;
+              }
+            }
+            break;
+
+          default:
+            assert(0);
+        }
+      }
 
       long RadosChannel::available()
       {
-        return capacity;
+        return capacity - pending_ios.size();
       }
 #endif
 

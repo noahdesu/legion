@@ -333,11 +333,13 @@ namespace Realm {
 
       virtual int get_home_node(off_t offset, size_t size);
 
-      void read_array(const char *objname, int *offset, int *count,
-          size_t nbytes, void *dst);
+      void read_array(librados::AioCompletion **pc, int *retval,
+          std::map<std::string, ceph::bufferlist> *vals,
+          const char *objname,
+          int *offset, int *count, size_t nbytes, void *dst);
 
-      void write_array(const char *objname, int *offset, int *count,
-          size_t nbytes, void *src);
+      void write_array(librados::AioCompletion **pc, const char *objname,
+          int *offset, int *count, size_t nbytes, void *src);
 
       struct RadosMemoryInst {
         bool read_only;
