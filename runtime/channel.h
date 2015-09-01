@@ -260,6 +260,10 @@ namespace LegionRuntime{
       char objname[100];
       int count[3];
       int offset[3];
+
+      int retval;
+      std::map<std::string, ceph::bufferlist> vals;
+      librados::AioCompletion *completion;
     };
 
     class RadosWriteRequest : public Request {
@@ -270,6 +274,7 @@ namespace LegionRuntime{
       char objname[100];
       int count[3];
       int offset[3];
+      librados::AioCompletion *completion;
     };
 #endif
 
@@ -1031,6 +1036,7 @@ namespace LegionRuntime{
       long available();
     private:
       long capacity;
+      std::deque<Request*> pending_ios;
     };
 #endif
 

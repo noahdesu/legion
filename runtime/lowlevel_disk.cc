@@ -310,41 +310,46 @@ namespace Realm {
       assert(ret == 0);
     }
 
-    void RadosMemory::read_array(const char *objname, int *offset, int *count,
-        size_t nbytes, void *dst)
+    void RadosMemory::read_array(librados::AioCompletion **pc, int *pretval,
+        std::map<std::string, ceph::bufferlist> *pvals,
+        const char *objname,
+        int *offset, int *count, size_t nbytes, void *dst)
     {
-      std::stringstream ss;
-      ss << offset[0] << "." << offset[1];
-
+      std::stringstream key_ss;
+      key_ss << offset[0] << "." << offset[1];
       std::set<std::string> keys;
-      keys.insert(ss.str());
+      keys.insert(key_ss.str());
 
-      std::map<std::string, ceph::bufferlist> vals;
-      int ret = ioctx.omap_get_vals_by_keys(objname, keys, &vals);
+      librados::ObjectReadOperation op;
+      op.omap_get_vals_by_keys(keys, pvals, pretval);
+
+      librados::AioCompletion *c = librados::Rados::aio_create_completion();
+      int ret = ioctx.aio_operate(objname, c, &op, NULL);
       assert(ret == 0);
 
-      std::map<std::string, ceph::bufferlist>::const_iterator it = vals.find(ss.str());
-      assert(it != vals.end());
-
-      ceph::bufferlist bl = it->second;
-
-      bl.copy(0, nbytes, (char*)dst);
+      *pc = c;
     }
 
-    void RadosMemory::write_array(const char *objname, int *offset, int *count,
+    void RadosMemory::write_array(librados::AioCompletion **pc,
+        const char *objname, int *offset, int *count,
         size_t nbytes, void *src)
     {
-      std::map<std::string, ceph::bufferlist> kv;
-
-      std::stringstream ss;
-      ss << offset[0] << "." << offset[1];
+      std::map<std::string, ceph::bufferlist> kvs;
+      std::stringstream key_ss;
+      key_ss << offset[0] << "." << offset[1];
 
       ceph::bufferlist bl;
       bl.append((const char*)src, nbytes);
-      kv[ss.str()] = bl;
+      kvs[key_ss.str()] = bl;
 
-      int ret = ioctx.omap_set(objname, kv);
+      librados::ObjectWriteOperation op;
+      op.omap_set(kvs);
+
+      librados::AioCompletion *c = librados::Rados::aio_create_completion();
+      int ret = ioctx.aio_operate(objname, c, &op);
       assert(ret == 0);
+
+      *pc = c;
     }
 
     void *RadosMemory::get_direct_ptr(off_t offset, size_t size)
