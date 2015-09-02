@@ -141,7 +141,9 @@ namespace Realm {
       std::flush(std::cout);
       cluster.init(NULL);
       // FIXME: how to inject env vars through gasnet?
+      cluster.conf_read_file(NULL);
       cluster.conf_read_file("/home/nwatkins/ceph/src/ceph.conf");
+      cluster.conf_read_file("/users/nwatkins/ceph/src/ceph.conf");
       cluster.conf_parse_env(NULL);
       int ret = cluster.connect();
       assert(ret == 0);

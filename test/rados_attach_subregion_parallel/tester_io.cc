@@ -51,7 +51,9 @@ void top_level_task(const Task *task,
    */
   librados::Rados cluster;
   cluster.init(NULL);
+  cluster.conf_read_file(NULL);
   cluster.conf_read_file("/home/nwatkins/ceph/src/ceph.conf");
+  cluster.conf_read_file("/users/nwatkins/ceph/src/ceph.conf");
   cluster.conf_parse_env(NULL);
   int ret = cluster.connect();
   assert(ret == 0);
