@@ -1198,6 +1198,14 @@ namespace LegionRuntime {
                     rados_inst->objmd[rados_idx].size[1] * elemnt_size) +
                     (rados_read_req->offset[1] * elemnt_size);
                     break;
+                case 3:
+                    offset = (rados_read_req->offset[0] *
+                        rados_inst->objmd[rados_idx].size[1] *
+                        rados_inst->objmd[rados_idx].size[2] * elemnt_size) +
+                      (rados_read_req->offset[1] *
+                       rados_inst->objmd[rados_idx].size[2] * elemnt_size) +
+                      (rados_read_req->offset[2] * elemnt_size);
+                    break;
                 default:
                   assert(0);
               }
@@ -1271,6 +1279,14 @@ namespace LegionRuntime {
                   offset = (rados_write_req->offset[0] *
                     rados_inst->objmd[rados_idx].size[1] * elemnt_size) +
                     (rados_write_req->offset[1] * elemnt_size);
+                    break;
+                case 3:
+                    offset = (rados_write_req->offset[0] *
+                        rados_inst->objmd[rados_idx].size[1] *
+                        rados_inst->objmd[rados_idx].size[2] * elemnt_size) +
+                      (rados_write_req->offset[1] *
+                       rados_inst->objmd[rados_idx].size[2] * elemnt_size) +
+                      (rados_write_req->offset[2] * elemnt_size);
                     break;
                 default:
                   assert(0);

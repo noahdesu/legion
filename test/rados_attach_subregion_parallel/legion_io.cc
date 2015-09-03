@@ -178,6 +178,45 @@ void PersistentRegion::create_persistent_subregions(Context ctx,
         }
         break;
 
+      case 3:
+        {
+          ds_name_stream <<  piece.dp[0] << "-" << piece.dp[1] << "-" << piece.dp[2];
+          sprintf(piece.shard_name, "%d-%d-%d-%s",
+              piece.dp[0], piece.dp[1], piece.dp[2], name); 
+
+          x_min = d.get_rect<3>().lo.x[0];
+          y_min = d.get_rect<3>().lo.x[1];
+          z_min = d.get_rect<3>().lo.x[2];
+          x_max = d.get_rect<3>().hi.x[0];
+          y_max = d.get_rect<3>().hi.x[1];
+          z_max = d.get_rect<3>().hi.x[2];
+
+          // shape of the shard
+          shard_size[0] = x_max-x_min+1;
+          shard_size[1] = y_max-y_min+1;
+          shard_size[2] = z_max-z_min+1;
+
+          obj_md.size[0] = shard_size[0];
+          obj_md.size[1] = shard_size[1];
+          obj_md.size[2] = shard_size[2];
+
+          // global coordinate of shard
+          shard_dims[0] = x_min;
+          shard_dims[1] = y_min;
+          shard_dims[2] = z_min;
+          shard_dims[3] = x_max;
+          shard_dims[4] = y_max;
+          shard_dims[5] = z_max;
+
+          obj_md.min_bounds[0] = shard_dims[0];
+          obj_md.min_bounds[1] = shard_dims[1];
+          obj_md.min_bounds[2] = shard_dims[2];
+          obj_md.max_bounds[0] = shard_dims[3];
+          obj_md.max_bounds[1] = shard_dims[4];
+          obj_md.max_bounds[2] = shard_dims[5];
+        }
+        break;
+
       default:
         assert(false);
     }
