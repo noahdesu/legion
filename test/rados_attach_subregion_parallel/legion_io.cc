@@ -141,6 +141,9 @@ void PersistentRegion::create_persistent_subregions(Context ctx,
     int shard_size[dim];
     int shard_dims[dim*2];
 
+    LegionRuntime::HighLevel::RadosMetadata obj_md;
+    obj_md.ndim = dim;
+
     std::ostringstream ds_name_stream;
 
     switch(dim) {
@@ -159,11 +162,19 @@ void PersistentRegion::create_persistent_subregions(Context ctx,
           shard_size[0] = x_max-x_min+1;
           shard_size[1] = y_max-y_min+1;
 
+          obj_md.size[0] = shard_size[0];
+          obj_md.size[1] = shard_size[1];
+
           // global coordinate of shard
           shard_dims[0] = x_min;
           shard_dims[1] = y_min;
           shard_dims[2] = x_max;
           shard_dims[3] = y_max;
+
+          obj_md.min_bounds[0] = shard_dims[0];
+          obj_md.min_bounds[1] = shard_dims[1];
+          obj_md.max_bounds[0] = shard_dims[2];
+          obj_md.max_bounds[1] = shard_dims[3];
         }
         break;
 
@@ -172,23 +183,26 @@ void PersistentRegion::create_persistent_subregions(Context ctx,
     }
 
     pieces.push_back(piece);
-    //shard_file_id = H5Fcreate(piece.shard_name, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
 
     assert(field_map.size() == 1);
+
     std::map<FieldID, const char*>::const_iterator it = field_map.begin();
     assert(it != field_map.end());
 
     const char *path = it->second;
     size_t field_size = runtime->get_field_size(ctx, fs, it->first);
+    obj_md.field_size = field_size;
 
     std::stringstream field_filename;
     field_filename << piece.shard_name << "." << path;
-    int ret = ioctx->create(field_filename.str(), false);
+    ioctx->remove(field_filename.str());
+    int ret = ioctx->create(field_filename.str(), true);
     assert(ret == 0);
 
-    //hid_t attr_id = H5Acreate2(shard_ds_id, "dims", H5T_NATIVE_INT, attr_ds_id,
-    //    H5P_DEFAULT, H5P_DEFAULT);
-    //status = H5Awrite(attr_id, H5T_NATIVE_INT, shard_dims);
+    ceph::bufferlist bl;
+    bl.append((char*)&obj_md, sizeof(obj_md));
+    ret = ioctx->omap_set_header(field_filename.str(), bl);
+    assert(ret == 0);
   }
 }
 

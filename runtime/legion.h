@@ -39,6 +39,23 @@ namespace LegionRuntime {
    */
   namespace HighLevel {
 
+    /*
+     * Unlike HDF5 there isn't yet a nice way to describe things like data
+     * structure for files/objects. Instead what we do for now is share a
+     * data structure between applications and the Legion runtime.
+     */
+    struct RadosMetadata {
+      int ndim;
+      size_t field_size; // current only 1 field supported
+
+      // dimension extents (x,y,z)
+      int size[3];
+
+      // dimension bounds (x,y,z)
+      int min_bounds[3];
+      int max_bounds[3];
+    };
+
     //==========================================================================
     //                       Data Description Classes
     //==========================================================================

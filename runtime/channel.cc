@@ -1053,8 +1053,10 @@ namespace LegionRuntime {
                                   uint64_t _max_req_size, long max_nr, int _priority,
                                   XferOrder::Type _order, XferKind _kind, Event _after_copy)
         : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid, _next_xd_guid, _src_buf, _dst_buf,
-                  _domain, _oas_vec, _max_req_size, _priority, _order, _kind, _after_copy)
+                  _domain, _oas_vec, _max_req_size, _priority, _order, _kind, _after_copy),
+        max_nr_(max_nr)
       {
+#if 0
         {
           std::stringstream ss;
           ss << "RadosXferDes: Domain: ";
@@ -1064,6 +1066,7 @@ namespace LegionRuntime {
             << "(" << rect.hi.x[0] << ", " << rect.hi.x[1] << ")";
           std::cout << ss.str() << std::endl;;
         }
+#endif
 
         MemoryImpl* src_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
@@ -1093,6 +1096,10 @@ namespace LegionRuntime {
               rados_read_reqs[i].memory = rados_inst->memory;
               strcpy(rados_read_reqs[i].objname, "<not-set>");
               available_reqs.push(&rados_read_reqs[i]);
+
+              // do an placment new operation... need to call
+              // destructor before free(requests).
+              new (&rados_read_reqs[i].bl) ceph::bufferlist();
             }
             requests = rados_read_reqs;
             hli = new Layouts::HDFLayoutIterator<DIM>(domain.get_rect<DIM>(),
@@ -1103,7 +1110,7 @@ namespace LegionRuntime {
               off_t offset = 0;
               int idx = 0;
               while (offset < (*fit).src_offset) {
-                offset += 8; // FIXME
+                offset += rados_inst->objmd[idx].field_size; // currently only one field
                 idx++;
               }
               assert(offset == (*fit).src_offset);
@@ -1137,7 +1144,7 @@ namespace LegionRuntime {
               off_t offset = 0;
               int idx = 0;
               while (offset < (*fit).dst_offset) {
-                offset += 8; // FIXME
+                offset += rados_inst->objmd[idx].field_size; // currently only one field
                 idx++;
               }
               assert(offset == (*fit).dst_offset);
@@ -1163,7 +1170,8 @@ namespace LegionRuntime {
           switch (kind) {
             case XferDes::XFER_RADOS_READ:
             {
-              size_t elemnt_size = 8; // FIXME
+              off_t rados_idx = fit->src_offset;
+              size_t elemnt_size = rados_inst->objmd[rados_idx].field_size;
               RadosReadRequest *rados_read_req = (RadosReadRequest*)requests[ns];
 
               size_t todo = 1;
@@ -1179,12 +1187,29 @@ namespace LegionRuntime {
               rados_read_req->nbytes = todo * elemnt_size;
               strcpy(rados_read_req->objname, rados_inst->objnames[fit->src_offset].c_str());
 
+              // compute some linearization for the byte stream. ultimatley
+              // this interface will look more like HDF5 in which this is
+              // abstracted. this is pretty inefficient, but shouldn't matter
+              // for big I/Os rightnow.
+              size_t offset;
+              switch (DIM) {
+                case 2:
+                  offset = (rados_read_req->offset[0] *
+                    rados_inst->objmd[rados_idx].size[1] * elemnt_size) +
+                    (rados_read_req->offset[1] * elemnt_size);
+                    break;
+                default:
+                  assert(0);
+              }
+              rados_read_req->objoffset = offset;
+
               break;
             }
 
             case XferDes::XFER_RADOS_WRITE:
             {
-              size_t elemnt_size = 8; // FIXME
+              off_t rados_idx = fit->dst_offset;
+              size_t elemnt_size = rados_inst->objmd[rados_idx].field_size;
               RadosWriteRequest *rados_write_req = (RadosWriteRequest*)requests[ns];
 
 #if 0
@@ -1235,6 +1260,22 @@ namespace LegionRuntime {
               rados_write_req->src = buf_base + src_offset;
               rados_write_req->nbytes = todo * elemnt_size;
               strcpy(rados_write_req->objname, rados_inst->objnames[fit->dst_offset].c_str());
+
+              // compute some linearization for the byte stream. ultimatley
+              // this interface will look more like HDF5 in which this is
+              // abstracted. this is pretty inefficient, but shouldn't matter
+              // for big I/Os rightnow.
+              size_t offset;
+              switch (DIM) {
+                case 2:
+                  offset = (rados_write_req->offset[0] *
+                    rados_inst->objmd[rados_idx].size[1] * elemnt_size) +
+                    (rados_write_req->offset[1] * elemnt_size);
+                    break;
+                default:
+                  assert(0);
+              }
+              rados_write_req->objoffset = offset;
 
               break;
             }
@@ -1982,14 +2023,16 @@ namespace LegionRuntime {
             for (int i = 0; i < nr; i++) {
               RadosReadRequest *request = rados_read_reqs[i];
               request->completion = NULL;
-              request->retval = -1;
-              request->vals.clear();
+              //request->retval = -1;
+              //request->vals.clear();
+              request->bl.clear();
               request->memory->read_array(&request->completion,
-                  &request->retval, &request->vals,
+                  &request->bl,
                   request->objname,
                   request->offset, request->count, request->nbytes,
-                  request->dst);
+                  request->dst, request->objoffset);
 #if 0
+              std::cout << "rados_read_offset: " << request->objoffset << std::endl;
               std::cout << "RadosRead: objname=" << request->objname <<
                 " offset=" << request->offset[0] << "," << request->offset[1] <<
                 " count=" << request->count[0] << "," << request->count[1] <<
@@ -2009,10 +2052,11 @@ namespace LegionRuntime {
               request->completion = NULL;
               request->memory->write_array(&request->completion, request->objname,
                   request->offset, request->count, request->nbytes,
-                  request->src);
+                  request->src, request->objoffset);
               pending_ios.push_back(request);
 
 #if 0
+              std::cout << "rados_write_offset: " << request->objoffset << std::endl;
               std::cout << "RadosWrite: objname=" << request->objname <<
                 " offset=" << request->offset[0] << "," << request->offset[1] <<
                 " count=" << request->count[0] << "," << request->count[1] <<
@@ -2038,15 +2082,9 @@ namespace LegionRuntime {
                 RadosReadRequest *request = (RadosReadRequest*)pending_ios.front();
                 librados::AioCompletion *c = request->completion;
                 if (c->is_safe()) {
-                  assert(request->retval == 0);
-                  assert(c->get_return_value() == 0);
+                  assert(c->get_return_value() == request->nbytes);
 
-                  assert(request->vals.size() == 1);
-                  std::map<std::string, ceph::bufferlist>::const_iterator it =
-                    request->vals.begin();
-                  assert(it != request->vals.end());
-                  ceph::bufferlist bl = it->second;
-                  bl.copy(0, request->nbytes, (char*)request->dst);
+                  request->bl.copy(0, request->nbytes, (char*)request->dst);
 
                   request->xd->notify_request_read_done(request);
                   request->xd->notify_request_write_done(request);

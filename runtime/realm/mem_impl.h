@@ -333,19 +333,22 @@ namespace Realm {
 
       virtual int get_home_node(off_t offset, size_t size);
 
-      void read_array(librados::AioCompletion **pc, int *retval,
-          std::map<std::string, ceph::bufferlist> *vals,
+      void read_array(librados::AioCompletion **pc,
+          ceph::bufferlist *bl,
           const char *objname,
-          int *offset, int *count, size_t nbytes, void *dst);
+          int *offset, int *count, size_t nbytes, void *dst,
+          size_t objoffset);
 
       void write_array(librados::AioCompletion **pc, const char *objname,
-          int *offset, int *count, size_t nbytes, void *src);
+          int *offset, int *count, size_t nbytes, void *src,
+          size_t objoffset);
 
       struct RadosMemoryInst {
         bool read_only;
         RadosMemory *memory;
         std::string file;
         std::vector<std::string> objnames;
+        std::vector<LegionRuntime::HighLevel::RadosMetadata> objmd;
         int ndims;
         int lo[3];
       };

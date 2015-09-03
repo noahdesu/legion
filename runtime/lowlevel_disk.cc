@@ -207,6 +207,44 @@ namespace Realm {
         std::stringstream ss;
         ss << rinst->file << "." << path_names[idx];
         rinst->objnames.push_back(ss.str());
+
+        ceph::bufferlist bl;
+        int ret = ioctx.omap_get_header(ss.str(), &bl);
+        assert(ret == 0);
+
+        LegionRuntime::HighLevel::RadosMetadata obj_md;
+        bl.copy(0, sizeof(obj_md), (char*)&obj_md);
+
+        assert(obj_md.ndim == rinst->ndims);
+        switch (obj_md.ndim) {
+          case 2:
+            assert(obj_md.min_bounds[0] == rinst->lo[0]);
+            assert(obj_md.min_bounds[1] == rinst->lo[1]);
+            break;
+          case 3:
+            assert(obj_md.min_bounds[0] == rinst->lo[0]);
+            assert(obj_md.min_bounds[1] == rinst->lo[1]);
+            assert(obj_md.min_bounds[2] == rinst->lo[2]);
+            break;
+          default:
+            assert(0);
+        }
+
+        rinst->objmd.push_back(obj_md);
+#if 0
+        fprintf(stdout, "objname=%s, field_size=%u, ndim=%d, size=%d,%d shard=%d,%d..%d,%d lo=%d,%d\n",
+            ss.str().c_str(),
+            (unsigned)obj_md.field_size,
+            obj_md.ndim,
+            obj_md.size[0],
+            obj_md.size[1],
+            obj_md.min_bounds[0],
+            obj_md.max_bounds[0],
+            obj_md.min_bounds[1],
+            obj_md.max_bounds[1],
+            rinst->lo[0],
+            rinst->lo[1]);
+#endif
       }
 
       pthread_mutex_lock(&lock);
@@ -260,6 +298,8 @@ namespace Realm {
     void RadosMemory::get_bytes(RegionInstance inst, const DomainPoint& dp,
         int fid, void *dst, size_t size)
     {
+      assert(0); // broken
+
       RadosMemoryInst *rinst = get_specific_instance(inst);
 
       int offset[3];
@@ -293,6 +333,8 @@ namespace Realm {
     void RadosMemory::put_bytes(RegionInstance inst, const DomainPoint& dp,
         int fid, const void *src, size_t size)
     {
+      assert(0); // broken
+
       RadosMemoryInst *rinst = get_specific_instance(inst);
 
       int offset[3];
@@ -312,11 +354,18 @@ namespace Realm {
       assert(ret == 0);
     }
 
-    void RadosMemory::read_array(librados::AioCompletion **pc, int *pretval,
-        std::map<std::string, ceph::bufferlist> *pvals,
+    void RadosMemory::read_array(librados::AioCompletion **pc,
+        ceph::bufferlist *bl,
         const char *objname,
-        int *offset, int *count, size_t nbytes, void *dst)
+        int *offset, int *count, size_t nbytes, void *dst,
+        size_t objoffset)
     {
+      librados::AioCompletion *c = librados::Rados::aio_create_completion();
+      int ret = ioctx.aio_read(objname, c, bl, nbytes, objoffset);
+      assert(ret == 0);
+
+      *pc = c;
+#if 0
       std::stringstream key_ss;
       key_ss << offset[0] << "." << offset[1];
       std::set<std::string> keys;
@@ -330,12 +379,29 @@ namespace Realm {
       assert(ret == 0);
 
       *pc = c;
+#endif
     }
 
+    /*
+     * Dispatch an AIO write to the array.
+     *
+     * Note that in its current form this would have trouble with reading your
+     * own writes and that sort of single threaded consistency as there is no
+     * cache consistency in librados...
+     */
     void RadosMemory::write_array(librados::AioCompletion **pc,
         const char *objname, int *offset, int *count,
-        size_t nbytes, void *src)
+        size_t nbytes, void *src, size_t objoffset)
     {
+      ceph::bufferlist bl;
+      bl.append((const char*)src, nbytes);
+
+      librados::AioCompletion *c = librados::Rados::aio_create_completion();
+      int ret = ioctx.aio_write(objname, c, bl, nbytes, objoffset);
+      assert(ret == 0);
+
+      *pc = c;
+#if 0
       std::map<std::string, ceph::bufferlist> kvs;
       std::stringstream key_ss;
       key_ss << offset[0] << "." << offset[1];
@@ -352,6 +418,7 @@ namespace Realm {
       assert(ret == 0);
 
       *pc = c;
+#endif
     }
 
     void *RadosMemory::get_direct_ptr(off_t offset, size_t size)

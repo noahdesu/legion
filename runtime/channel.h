@@ -261,8 +261,10 @@ namespace LegionRuntime{
       int count[3];
       int offset[3];
 
-      int retval;
-      std::map<std::string, ceph::bufferlist> vals;
+      //int retval;
+      size_t objoffset; // linearization offset for write
+      //std::map<std::string, ceph::bufferlist> vals;
+      ceph::bufferlist bl;
       librados::AioCompletion *completion;
     };
 
@@ -274,6 +276,7 @@ namespace LegionRuntime{
       char objname[100];
       int count[3];
       int offset[3];
+      size_t objoffset; // linearization offset for write
       librados::AioCompletion *completion;
     };
 #endif
@@ -848,6 +851,15 @@ namespace LegionRuntime{
         while (!available_reqs.empty()) {
           available_reqs.pop();
         }
+        if (kind == XferDes::XFER_RADOS_READ) {
+          // call destructor directly since the memory is going to be released
+          // with free below...
+          RadosReadRequest *rados_read_reqs = (RadosReadRequest*)requests;
+          for (int i = 0; i < max_nr_; i++) {
+            ceph::buffer::list *bl = &rados_read_reqs[i].bl;
+            bl->~list();
+          }
+        }
         free(requests);
         delete hli;
         // trigger complete event
@@ -867,6 +879,7 @@ namespace LegionRuntime{
       RadosMemory::RadosMemoryInst *rados_inst;
       std::vector<OffsetsAndSize>::iterator fit;
       Layouts::HDFLayoutIterator<DIM>* hli;
+      long max_nr_;
     };
 #endif
 
