@@ -859,6 +859,7 @@ namespace LegionRuntime{
       long get_requests(Request** requests, long nr);
       void notify_request_read_done(Request* req);
       void notify_request_write_done(Request* req);
+      void flush();
 
     private:
       Request* requests;

@@ -1306,6 +1306,10 @@ namespace LegionRuntime {
             assert(0);
         }
       }
+
+      template <unsigned DIM>
+      void RadosXferDes<DIM>::flush() {
+      }
 #endif
 
 #ifdef USE_HDF
