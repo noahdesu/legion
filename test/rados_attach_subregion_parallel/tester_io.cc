@@ -20,6 +20,7 @@
 #include <cstdlib>
 #include <unistd.h>
 #include <math.h>
+#include <cmath>
 #include <rados/librados.hpp>
 #include "legion.h"
 #include "legion_io.h"
