@@ -32,5 +32,7 @@ for point, nsec in write_begins.items():
     write_end = write_ends[point]
     read_start = write_end
     read_end = read_ends[point]
+
+    point = point.replace(",", "-")
     print point, write_start, write_end, write_end-write_start,\
             read_start, read_end, read_end-read_start
