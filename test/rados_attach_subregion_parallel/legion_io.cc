@@ -12,6 +12,21 @@ void copy_values_task(const Task *task,
   assert(task->regions.size() == 2);
   assert(piece.child_lr == regions[0].get_logical_region()); 
 
+#ifdef TESTERIO_TIMERS 
+  struct timespec ts;
+  current_utc_time(&ts);   
+
+  if (write) {
+    std::cout << "domain point: " << piece.dp
+              << "; write begins at:  seconds: " << ts.tv_sec
+              << " nanos: " << ts.tv_nsec << std::endl; 
+  } else {
+    std::cout << "domain point: " << piece.dp
+              << "; write ends & read begins at:  seconds: " << ts.tv_sec
+              << " nanos: " << ts.tv_nsec << std::endl; 
+  }
+#endif
+
   // not needed because task is launched with no instance flag set...? doesn't
   // seem to work without doing this.
   runtime->unmap_region(ctx, regions[0]);

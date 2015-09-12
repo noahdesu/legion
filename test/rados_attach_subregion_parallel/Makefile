@@ -32,7 +32,7 @@ USE_RADOS = 1
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	:= -I/opt/local/include/ 
-CC_FLAGS	?= -g -Wno-unused
+CC_FLAGS	?= -g -Wno-unused -DTESTERIO_TIMERS
 NVCC_FLAGS	:=
 GASNET_FLAGS	:=
 LD_FLAGS	:= -L/opt/local/lib -lhdf5
