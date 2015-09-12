@@ -27,22 +27,30 @@ for line in sys.stdin.readlines():
     else:
         assert False
 
+write_nsec = []
+read_nsec = []
+num_shards = 0
 for point, nsec in write_begins.items():
     write_start = nsec
     write_end = write_ends[point]
     read_start = write_end
     read_end = read_ends[point]
-
     point = point.replace(",", "-")
 
-    # using raw nanosecond values
-    #print point, write_start, write_end, write_end-write_start,\
-    #        read_start, read_end, read_end-read_start
+    num_shards += 1
+    write_nsec.append(write_end - write_start);
+    read_nsec.append(read_end - read_start);
 
-    # using seconds
-    write_start = write_start * 1.0 / 10**9
-    write_end = write_end * 1.0 / 10**9
-    read_start = read_start * 1.0 / 10**9
-    read_end = read_end * 1.0 / 10**9
-    print point, write_start, write_end, write_end-write_start,\
-            read_start, read_end, read_end-read_start
+write_sec = map(lambda ns: ns*1.0/10**9, write_nsec)
+read_sec = map(lambda ns: ns*1.0/10**9, read_nsec)
+
+min_write_sec = min(write_sec)
+max_write_sec = max(write_sec)
+avg_write_sec = sum(write_sec)/len(write_sec)
+min_read_sec = min(read_sec)
+max_read_sec = max(read_sec)
+avg_read_sec = sum(read_sec)/len(read_sec)
+
+print "num shards:", num_shards
+print "write: min,max,avg:", min_write_sec, max_write_sec, avg_write_sec
+print "read:  min,max,avg:", min_read_sec, max_read_sec, avg_read_sec
