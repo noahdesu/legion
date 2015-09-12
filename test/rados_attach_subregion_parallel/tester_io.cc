@@ -64,6 +64,8 @@ void top_level_task(const Task *task,
       elem_rect_hi_val = sqrt(num_elements) - 1;
       color_hi_val = sqrt(sub_regions)-1;
       patch_val = sqrt(num_elements / sub_regions); 
+      assert(num_elements == (std::pow(patch_val, 2) * std::pow(color_hi_val+1, 2)));
+      assert(num_elements == std::pow(elem_rect_hi_val+1, 2));
       break;
 
     case 3:
@@ -128,9 +130,11 @@ void top_level_task(const Task *task,
     FieldAllocator allocator = 
       runtime->create_field_allocator(ctx, fs);
     allocator.allocate_field(sizeof(double),FID_TEMP);
+#if 0
     allocator.allocate_field(sizeof(double),FID_SAL);
     allocator.allocate_field(sizeof(double),FID_KE);
     allocator.allocate_field(sizeof(double),FID_VOR);
+#endif
   }
 
   FieldSpace persistent_fs = runtime->create_field_space(ctx);

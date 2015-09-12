@@ -41,6 +41,13 @@ for point, nsec in write_begins.items():
     write_nsec.append(write_end - write_start);
     read_nsec.append(read_end - read_start);
 
+min_write_begin = min(write_begins.itervalues())
+max_write_end = max(write_ends.itervalues())
+min_read_begin = min(write_ends.itervalues())
+max_read_end = max(read_ends.itervalues())
+write_phase = (max_write_end - min_write_begin) * 1.0 / 10**9
+read_phase = (max_read_end - min_read_begin) * 1.0 / 10**9
+
 write_sec = map(lambda ns: ns*1.0/10**9, write_nsec)
 read_sec = map(lambda ns: ns*1.0/10**9, read_nsec)
 
@@ -54,3 +61,5 @@ avg_read_sec = sum(read_sec)/len(read_sec)
 print "num shards:", num_shards
 print "write: min,max,avg:", min_write_sec, max_write_sec, avg_write_sec
 print "read:  min,max,avg:", min_read_sec, max_read_sec, avg_read_sec
+print "write_phase:", write_phase
+print "read_phase:", read_phase
