@@ -21,6 +21,7 @@ using namespace LegionRuntime::Arrays;
 enum TaskIDs {
   MAIN_TASK_ID,
   INIT_TASK_ID,
+  UPDATE_W_TASK_ID,
   GRADIENT_TASK_ID,
 };
 
@@ -157,49 +158,83 @@ void main_task(const Task *task,
   init_launcher.region_requirements[0].add_field(FID_POINT);
   runtime->execute_index_space(ctx, init_launcher);
 
-#if 0
   /*
-   * This si a very simple, easy to understand example. We can demonstrate
-   * this with all in memory, tiering, and remote reductions in storage.
+   * Create a logical region with one point that will hold the "w" value that
+   * is updated by all tasks at the start of each refinement iteration.
    */
+  ptr_t w_ptr;
+  IndexSpace w_is = runtime->create_index_space(ctx, 1);
+  {
+    IndexAllocator allocator = runtime->create_index_allocator(ctx, w_is);
+    w_ptr = allocator.alloc(1);
+  }
+  LogicalRegion w_lr = runtime->create_logical_region(ctx, w_is, fs);
 
-  >>> (1 / (1 + exp(-0.5*(w.dot(0.5)))) - 1) * 0.5 * 0.5
-    Traceback (most recent call last):
-        File "<stdin>", line 1, in <module>
-        NameError: name 'exp' is not defined
-        >>> (1 / (1 + numpy.exp(-0.5*(w.dot(0.5)))) - 1) * 0.5 * 0.5
-        array([-0.11214672, -0.1129544 ])
+  /*
+   * Initialize the region holding "w"
+   */
+  InlineLauncher w_launcher(RegionRequirement(w_lr,
+        WRITE_DISCARD, EXCLUSIVE, w_lr));
+  w_launcher.add_field(FID_POINT);
+  PhysicalRegion w_pr = runtime->map_region(ctx, w_launcher);
 
-  w is 2d
-  the lambda func produces a 2d output
-  the reduction produces gradient which is 2d
-  ranf provides float, so everything is double
-#endif
+  RegionAccessor<AccessorType::Generic, Fpoint> w_pt_acc = 
+    w_pr.get_field_accessor(FID_POINT).typeify<Fpoint>();
 
-  Fpoint w;
-  w.x = drand48();
-  w.y = drand48();
+  Fpoint w_init;
+  w_init.x = drand48();
+  w_init.y = drand48();
 
+  w_pt_acc.write(w_ptr, w_init);
+
+  runtime->unmap_region(ctx, w_pr);
+
+  /*
+   *
+   */
   for (int i = 0; i < 100; i++) {
-
     IndexLauncher gradient_launcher(GRADIENT_TASK_ID, color_domain,
-        TaskArgument(&w, sizeof(w)), ArgumentMap());
+        TaskArgument(&w_ptr, sizeof(w_ptr)), ArgumentMap());
 
+    // input points
     gradient_launcher.add_region_requirement(
-        RegionRequirement(lp, 0,
-          READ_ONLY, EXCLUSIVE, lr));
+        RegionRequirement(lp, 0, READ_ONLY, EXCLUSIVE, lr));
     gradient_launcher.region_requirements[0].add_field(FID_POINT);
 
-    Future gradient_future = runtime->execute_index_space(ctx,
+    // current "w" value
+    gradient_launcher.add_region_requirement(
+        RegionRequirement(w_lr, READ_ONLY, EXCLUSIVE, w_lr));
+    gradient_launcher.region_requirements[1].add_field(FID_POINT);
+
+    Future w_delta = runtime->execute_index_space(ctx,
         gradient_launcher, ADD_REDOP_ID);
 
-    Fpoint gradient = gradient_future.get_result<Fpoint>();
+    /*
+     * Launch a task to subtract the delta from the global "w" value that will
+     * be used as input to the next launch of the gradient task. Using a
+     * dynamic collective here might be more succient. Or could each gradient
+     * launcher directly update the shared "w" value?
+     */
+    TaskLauncher update_w_launcher(UPDATE_W_TASK_ID,
+        TaskArgument(&w_ptr, sizeof(w_ptr)));
 
-    w.x -= gradient.x;
-    w.y -= gradient.y;
+    update_w_launcher.add_future(w_delta);
 
-    std::cout << i << ": " << w.x <<  " " << w.y << std::endl;
+    update_w_launcher.add_region_requirement(
+        RegionRequirement(w_lr, READ_WRITE, EXCLUSIVE, w_lr));
+    update_w_launcher.region_requirements[0].add_field(FID_POINT);
+
+    runtime->execute_task(ctx, update_w_launcher);
   }
+
+  w_launcher.requirement.privilege = READ_ONLY;
+  w_pr = runtime->map_region(ctx, w_launcher);
+  w_pt_acc = w_pr.get_field_accessor(FID_POINT).typeify<Fpoint>();
+
+  Fpoint w_final = w_pt_acc.read(w_ptr);
+  runtime->unmap_region(ctx, w_pr);
+
+  std::cout << "final: " << w_final.x << " " << w_final.y << std::endl;
 
   runtime->destroy_logical_region(ctx, lr);
   runtime->destroy_field_space(ctx, fs);
@@ -230,15 +265,53 @@ void init_task(const Task *task,
   }
 }
 
-Fpoint gradient_task(const Task *task,
+/*
+ *
+ */
+void update_w_task(const Task *task,
     const std::vector<PhysicalRegion> &regions,
     Context ctx, HighLevelRuntime *runtime)
 {
   assert(regions.size() == 1); 
   assert(task->regions.size() == 1);
   assert(task->regions[0].privilege_fields.size() == 1);
+  assert(task->futures.size() == 1);
 
-  Fpoint w = *((Fpoint*)task->args);
+  assert(task->arglen == sizeof(ptr_t));
+  ptr_t w_ptr = *((ptr_t*)task->args);
+
+  Future w_delta_f = task->futures[0];
+  Fpoint w_delta = w_delta_f.get_result<Fpoint>();
+
+  RegionAccessor<AccessorType::Generic, Fpoint> w_pt_acc = 
+    regions[0].get_field_accessor(FID_POINT).typeify<Fpoint>();
+
+  Fpoint w = w_pt_acc.read(w_ptr);
+  w.x -= w_delta.x;
+  w.y -= w_delta.y;
+  w_pt_acc.write(w_ptr, w);
+}
+
+/*
+ *
+ */
+Fpoint gradient_task(const Task *task,
+    const std::vector<PhysicalRegion> &regions,
+    Context ctx, HighLevelRuntime *runtime)
+{
+  assert(regions.size() == 2); 
+  assert(task->regions.size() == 2);
+  assert(task->regions[0].privilege_fields.size() == 1);
+  assert(task->regions[1].privilege_fields.size() == 1);
+
+  assert(task->arglen == sizeof(ptr_t));
+  ptr_t w_ptr = *((ptr_t*)task->args);
+
+  RegionAccessor<AccessorType::Generic, Fpoint> w_pt_acc = 
+    regions[1].get_field_accessor(FID_POINT).typeify<Fpoint>();
+
+  Fpoint w = w_pt_acc.read(w_ptr);
+
   Fpoint ret = {0.0, 0.0};
 
   RegionAccessor<AccessorType::Generic, Fpoint> pt_acc = 
@@ -273,6 +346,10 @@ int main(int argc, char **argv)
   HighLevelRuntime::register_legion_task<init_task>(INIT_TASK_ID,
       Processor::LOC_PROC, true/*single*/, true/*index*/,
       AUTO_GENERATE_ID, TaskConfigOptions(true), "init");
+
+  HighLevelRuntime::register_legion_task<update_w_task>(UPDATE_W_TASK_ID,
+      Processor::LOC_PROC, true/*single*/, true/*index*/,
+      AUTO_GENERATE_ID, TaskConfigOptions(true), "update_w");
 
   HighLevelRuntime::register_legion_task<Fpoint, gradient_task>(
       GRADIENT_TASK_ID, Processor::LOC_PROC, true, true,
