@@ -21,29 +21,42 @@ enum FieldIDs {
   FID_POINT,
 };
 
-struct Fpoint {
+struct DoublePoint {
+  DoublePoint() {}
+  DoublePoint(double x, double y) :
+    x(x), y(y)
+  {}
+
+  double euclid_dist_2(const DoublePoint& o) const {
+    double xd = x - o.x;
+    double yd = y - o.y;
+    return xd*xd + yd*yd;
+  }
+
   double x;
   double y;
 };
 
-#define INIT_NUM_CLUSTERS 2
-
-static double euclid_dist_2(Fpoint p, Fpoint c)
+static std::ostream& operator<<(std::ostream &os, const DoublePoint& pt)
 {
-  return ((p.x - c.x) * (p.x - c.x)) + ((p.y - c.y) * (p.y - c.y));
+  os << pt.x << " " << pt.y;
+  return os;
 }
 
-static unsigned find_nearest_cluster(Fpoint p, Fpoint *clusters)
+static int find_nearest_cluster(DoublePoint pt,
+    const DoublePoint *clusters, int num_clusters)
 {
-  unsigned index = 0;
-  double min_dist = euclid_dist_2(p, clusters[0]);
-  for (unsigned i = 1; i < INIT_NUM_CLUSTERS; i++) {
-    double dist = euclid_dist_2(p, clusters[i]);
+  int index = 0;
+
+  double min_dist = pt.euclid_dist_2(clusters[0]);
+  for (int i = 1; i < num_clusters; i++) {
+    double dist = pt.euclid_dist_2(clusters[i]);
     if (dist < min_dist) {
       min_dist = dist;
       index = i;
     }
   }
+
   return index;
 }
 
@@ -53,6 +66,7 @@ void main_task(const Task *task,
 {
   int num_elements = 8192;
   int num_subregions = 4;
+  int num_clusters = 2;
 
   Rect<1> elem_rect(Point<1>(0),Point<1>(num_elements-1));
   IndexSpace is = runtime->create_index_space(ctx, 
@@ -62,7 +76,7 @@ void main_task(const Task *task,
   {
     FieldAllocator allocator =
       runtime->create_field_allocator(ctx, fs);
-    allocator.allocate_field(sizeof(Fpoint), FID_POINT);
+    allocator.allocate_field(sizeof(DoublePoint), FID_POINT);
   }
 
   LogicalRegion lr = runtime->create_logical_region(ctx, is, fs);
@@ -76,21 +90,8 @@ void main_task(const Task *task,
 
   LogicalPartition lp = runtime->get_logical_partition(ctx, lr, ip);
 
-  Fpoint init_cluster_points[INIT_NUM_CLUSTERS];
-  init_cluster_points[0].x = 0.25;
-  init_cluster_points[0].y = 0.25;
-  init_cluster_points[1].x = 0.75;
-  init_cluster_points[1].y = 0.75;
-#if 0
-  for (unsigned i = 0; i < INIT_NUM_CLUSTERS; i++) {
-    init_cluster_points[i].x = drand48();
-    init_cluster_points[i].y = drand48();
-  }
-#endif
-
   IndexLauncher init_launcher(INIT_TASK_ID, color_domain,
-      TaskArgument(init_cluster_points, sizeof(init_cluster_points)),
-      ArgumentMap());
+      TaskArgument(NULL, 0), ArgumentMap());
 
   init_launcher.add_region_requirement(
       RegionRequirement(lp, 0,
@@ -103,8 +104,8 @@ void main_task(const Task *task,
   PhysicalRegion pr = runtime->map_region(ctx, pts_launcher);
   pr.wait_until_valid();
 
-  RegionAccessor<AccessorType::Generic, Fpoint> pt_acc = 
-    pr.get_field_accessor(FID_POINT).typeify<Fpoint>();
+  RegionAccessor<AccessorType::Generic, DoublePoint> pt_acc = 
+    pr.get_field_accessor(FID_POINT).typeify<DoublePoint>();
 
   std::stringstream filename;
   filename << "init_cluster_pts." << task->get_unique_task_id() << ".dat";
@@ -113,30 +114,30 @@ void main_task(const Task *task,
   init_pts_file.open(filename.str().c_str(), std::ios::out | std::ios::trunc);
   assert(init_pts_file.is_open());
 
-  Fpoint clusters[INIT_NUM_CLUSTERS];
-  for (unsigned i = 0; i < INIT_NUM_CLUSTERS; i++) {
+  DoublePoint clusters[num_clusters];
+  for (int i = 0; i < num_clusters; i++) {
     clusters[i].x = drand48();
     clusters[i].y = drand48();
     init_pts_file << clusters[i].x << " " << clusters[i].y << std::endl;
   }
 
-  long clusterSizes[INIT_NUM_CLUSTERS];
+  long clusterSizes[num_clusters];
   memset(clusterSizes, 0, sizeof(clusterSizes));
 
-  Fpoint newClusters[INIT_NUM_CLUSTERS];
+  DoublePoint newClusters[num_clusters];
   memset(newClusters, 0, sizeof(clusterSizes));
 
   for (int xx = 0; xx < 5; xx++) {
 
     for (GenericPointInRectIterator<1> pir(elem_rect); pir; pir++) {
-      Fpoint p = pt_acc.read(DomainPoint::from_point<1>(pir.p));
-      unsigned cluster_index = find_nearest_cluster(p, clusters);
+      DoublePoint p = pt_acc.read(DomainPoint::from_point<1>(pir.p));
+      int cluster_index = find_nearest_cluster(p, clusters, num_clusters);
       clusterSizes[cluster_index]++;
       newClusters[cluster_index].x += p.x;
       newClusters[cluster_index].y += p.y;
     }
 
-    for (unsigned i = 0; i < INIT_NUM_CLUSTERS; i++) {
+    for (int i = 0; i < num_clusters; i++) {
       if (clusterSizes[i] > 1) {
         clusters[i].x = newClusters[i].x / clusterSizes[i];
         clusters[i].y = newClusters[i].y / clusterSizes[i];
@@ -155,7 +156,7 @@ void main_task(const Task *task,
   final_pts_file.open(filename.str().c_str(), std::ios::out | std::ios::trunc);
   assert(final_pts_file.is_open());
 
-  for (unsigned i = 0; i < INIT_NUM_CLUSTERS; i++) {
+  for (int i = 0; i < num_clusters; i++) {
     final_pts_file << clusters[i].x << " " << clusters[i].y << std::endl;
   }
 
@@ -170,14 +171,25 @@ void init_task(const Task *task,
   assert(task->regions.size() == 1);
   assert(task->regions[0].privilege_fields.size() == 1);
 
-  Fpoint *init_cluster_points = (Fpoint*)task->args;
-
-  RegionAccessor<AccessorType::Generic, Fpoint> pt_acc = 
-    regions[0].get_field_accessor(FID_POINT).typeify<Fpoint>();
+  RegionAccessor<AccessorType::Generic, DoublePoint> pt_acc = 
+    regions[0].get_field_accessor(FID_POINT).typeify<DoublePoint>();
 
   Domain dom = runtime->get_index_space_domain(ctx, 
       task->regions[0].region.get_index_space());
   Rect<1> rect = dom.get_rect<1>();
+
+  /*
+   * Create some clusters evenly spaced in [0,1].
+   */
+  int num_init_clusters = 2;
+  DoublePoint init_clusters[num_init_clusters];
+  double increment = 1.0 / (double)(num_init_clusters+1);
+  double position = increment;
+  for (int i = 0; i < num_init_clusters; i++) {
+    init_clusters[i].x = position;
+    init_clusters[i].y = position;
+    position += increment;
+  }
 
   for (GenericPointInRectIterator<1> pir(rect); pir; pir++) {
     double u = drand48();
@@ -187,11 +199,11 @@ void init_task(const Task *task,
     double x = w * std::cos(t);
     double y = w * std::sin(t);
 
-    unsigned cluster = std::rand() % INIT_NUM_CLUSTERS + 1;
+    int cluster = std::rand() % num_init_clusters;
 
-    Fpoint pt;
-    pt.x = init_cluster_points[cluster].x + x;
-    pt.y = init_cluster_points[cluster].y + y;
+    DoublePoint pt(
+        init_clusters[cluster].x + x,
+        init_clusters[cluster].y + y);
 
     pt_acc.write(DomainPoint::from_point<1>(pir.p), pt);
   }
@@ -204,8 +216,8 @@ void init_task(const Task *task,
   assert(pts_file.is_open());
 
   for (GenericPointInRectIterator<1> pir(rect); pir; pir++) {
-    Fpoint pt = pt_acc.read(DomainPoint::from_point<1>(pir.p));
-    pts_file << pt.x << " " << pt.y << std::endl;
+    DoublePoint pt = pt_acc.read(DomainPoint::from_point<1>(pir.p));
+    pts_file << pt << std::endl;
   }
 
   pts_file.close();
